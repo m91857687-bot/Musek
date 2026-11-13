@@ -1,0 +1,6 @@
+{
+  "name": "Music Player Pro Max",
+  "description": "An advanced music player with cinematic playback, audio effects, equalizer, lyrics, and listening statistics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
