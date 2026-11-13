@@ -11,6 +11,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.musicplayer.promax.data.local.MusicLibraryDatabase
 import com.musicplayer.promax.data.media.MediaStoreMusicScanner
+import com.musicplayer.promax.data.metadata.TrackMetadataRepository
 import com.musicplayer.promax.data.preferences.DataStoreUserPreferencesRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
@@ -74,6 +75,7 @@ class MusicIndexWorker(
                 return Result.failure(androidx.work.workDataOf(KEY_ERROR to "audio_permission_required"))
             }
             setProgress(androidx.work.workDataOf(KEY_TRACK_COUNT to total))
+            TrackMetadataRepository(applicationContext).prefetchMissingArtwork()
             return Result.success(androidx.work.workDataOf(KEY_TRACK_COUNT to total))
         } catch (cancelled: CancellationException) {
             throw cancelled

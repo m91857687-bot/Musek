@@ -69,7 +69,10 @@ fun NowPlayingScreen(controller: MediaController, onBack: () -> Unit, modifier: 
     val currentTrack = trackFlow.collectAsStateWithLifecycle(initialValue = null).value
     LaunchedEffect(currentTrack?.trackKey, currentTrack?.artworkFilePath) {
         val track = currentTrack ?: return@LaunchedEffect
-        if (track.artworkFilePath.isNullOrBlank() || !File(track.artworkFilePath).isFile) metadataRepository.extractArtwork(track.copy(artworkFilePath = null))
+        val path = track.artworkFilePath
+        if (path == null || (path.isNotEmpty() && !File(path).isFile)) {
+            metadataRepository.extractArtwork(track.copy(artworkFilePath = null))
+        }
     }
     val lyricLines = remember(currentTrack?.lyricsLrc) { currentTrack?.lyricsLrc?.let(LrcParser::parse).orEmpty() }
     var positionMs by remember(controller) { mutableLongStateOf(controller.currentPosition.coerceAtLeast(0L)) }

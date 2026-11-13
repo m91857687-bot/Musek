@@ -66,9 +66,12 @@ fun HomeScreen(
     playlistsCount: Int = 0,
     favoriteKeys: Set<String> = emptySet(),
     activeTrackKey: String? = null,
+    repeatingTrackKey: String? = null,
     recentTracks: List<MusicTrackEntity> = emptyList(),
     favoriteTracks: List<MusicTrackEntity> = emptyList(),
     onPlayTrack: (List<MusicTrackEntity>, MusicTrackEntity) -> Unit = { _, _ -> },
+    onToggleRepeatTrack: (List<MusicTrackEntity>, MusicTrackEntity) -> Unit = { _, _ -> },
+    onAddToPlaylist: (MusicTrackEntity) -> Unit = {},
     onToggleFavorite: (String) -> Unit = {},
     onShufflePlay: () -> Unit = {},
     onScanMusic: () -> Unit = {},
@@ -187,9 +190,12 @@ fun HomeScreen(
                         EditorialTrackRow(
                             track = track,
                             isCurrentTrack = track.trackKey == activeTrackKey,
+                            isRepeatingTrack = track.trackKey == repeatingTrackKey,
                             isFavorite = track.trackKey in favoriteKeys,
                             onClick = { onPlayTrack(allTracks, track) },
+                            onToggleRepeatTrack = { onToggleRepeatTrack(allTracks, track) },
                             onToggleFavorite = { onToggleFavorite(track.trackKey) },
+                            onAddToPlaylist = { onAddToPlaylist(track) },
                             showDivider = index < homePreviewTracks.lastIndex
                         )
                     }

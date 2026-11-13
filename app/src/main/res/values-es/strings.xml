@@ -170,4 +170,8 @@ empieza aquí.</string>
     <string name="see_all">Ver todo</string>
     <string name="ready_to_scan">Analiza tu dispositivo para empezar.</string>
     <string name="more_options">Más opciones</string>
+    <string name="add_songs">Añadir canciones</string>
+    <string name="repeat_this_song">Repetir esta canción</string>
+    <string name="repeating_song">Repitiendo</string>
+    <string name="done">Listo</string>
 </resources>

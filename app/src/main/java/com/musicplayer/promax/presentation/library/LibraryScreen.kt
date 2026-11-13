@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -64,21 +65,23 @@ import com.musicplayer.promax.ui.theme.SubtleBorder
 fun LibraryScreen(
     state: LibraryUiState,
     activeTrackKey: String? = null,
+    repeatingTrackKey: String? = null,
     focusSearchRequest: Boolean = false,
     onSearchFocusConsumed: () -> Unit = {},
     onScanClick: () -> Unit,
     hasAudioPermission: Boolean,
     onTrackClick: (MusicTrackEntity) -> Unit,
+    onToggleRepeatTrack: (MusicTrackEntity) -> Unit = {},
     onSearchChanged: (String) -> Unit,
     onSortChanged: (String) -> Unit,
     onFavoritesOnlyChanged: (Boolean) -> Unit,
     onToggleFavorite: (String) -> Unit,
-    onAddToPlaylist: (Long, String) -> Unit,
+    onAddToPlaylistRequest: (MusicTrackEntity) -> Unit,
     onUpdateMetadata: (String, String, String, String) -> Unit,
-    onImportLyrics: (String) -> Unit
+    onImportLyrics: (String) -> Unit,
+    onOpenSettings: (() -> Unit)? = null
 ) {
     var sortMenuExpanded by remember { mutableStateOf(false) }
-    var trackForPlaylist by remember { mutableStateOf<MusicTrackEntity?>(null) }
     var trackForEdit by remember { mutableStateOf<MusicTrackEntity?>(null) }
     val searchFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -90,14 +93,24 @@ fun LibraryScreen(
     }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 24.dp),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
             PremiumScreenHeader(
                 eyebrow = stringResource(R.string.your_collection),
                 title = stringResource(R.string.library),
-                subtitle = stringResource(R.string.library_screen_subtitle)
+                subtitle = stringResource(R.string.library_screen_subtitle),
+                trailingAction = onOpenSettings?.let { openSettings ->
+                    {
+                        IconButton(
+                            onClick = openSettings,
+                            modifier = Modifier.testTag("library_settings_button")
+                        ) {
+                            Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings))
+                        }
+                    }
+                }
             )
         }
         item {
@@ -209,10 +222,12 @@ fun LibraryScreen(
                 EditorialTrackRow(
                     track = track,
                     isCurrentTrack = track.trackKey == activeTrackKey,
+                    isRepeatingTrack = track.trackKey == repeatingTrackKey,
                     isFavorite = track.trackKey in state.favoriteKeys,
                     onClick = { onTrackClick(track) },
+                    onToggleRepeatTrack = { onToggleRepeatTrack(track) },
                     onToggleFavorite = { onToggleFavorite(track.trackKey) },
-                    onAddToPlaylist = { trackForPlaylist = track },
+                    onAddToPlaylist = { onAddToPlaylistRequest(track) },
                     onEditMetadata = { trackForEdit = track }
                 )
             }
@@ -228,14 +243,6 @@ fun LibraryScreen(
                 trackForEdit = null
             },
             onImportLyrics = { onImportLyrics(track.trackKey) }
-        )
-    }
-    trackForPlaylist?.let { track ->
-        AddToPlaylistDialog(
-            track = track,
-            playlists = state.playlists,
-            onDismiss = { trackForPlaylist = null },
-            onSelect = { playlistId -> onAddToPlaylist(playlistId, track.trackKey); trackForPlaylist = null }
         )
     }
 }
@@ -284,35 +291,4 @@ private fun TrackMetadataDialog(
         confirmButton = { TextButton(onClick = { onSave(title, artist, album) }) { Text(stringResource(R.string.save)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
     )
-}
-
-@Composable
-private fun AddToPlaylistDialog(
-    track: MusicTrackEntity,
-    playlists: List<PlaylistWithCount>,
-    onDismiss: () -> Unit,
-    onSelect: (Long) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.add_to_playlist)) },
-        text = {
-            if (playlists.isEmpty()) Text(stringResource(R.string.create_playlist_first))
-            else Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(track.displayTitle, color = SecondaryText, style = MaterialTheme.typography.labelMedium)
-                playlists.forEach { item ->
-                    TextButton(onClick = { onSelect(item.playlist.playlistId) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(item.playlist.name, modifier = Modifier.weight(1f))
-                        Text(item.trackCount.toString(), color = SecondaryText)
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) } }
-    )
-}
-
-private fun formatDuration(durationMs: Long): String {
-    val totalSeconds = durationMs / 1000
-    return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
 }

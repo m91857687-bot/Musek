@@ -198,4 +198,44 @@ class MusicLibraryDatabaseTest {
         val matchByArtist = dao.observeLibraryTracks("aria", "TITLE", false).first()
         assertEquals(listOf("v:1"), matchByArtist.map { it.trackKey })
     }
+
+    @Test
+    fun tracksMissingArtworkOnlyReturnsNullArtworkTracks() = runTest {
+        val dao = db.musicTrackDao()
+        dao.upsertTracks(
+            listOf(
+                MusicTrackEntity("v:1", 1L, "v", "content://1", "Song 1", "A", "B", 100_000L, 1000L, 100L, "audio/mpeg", null, artworkFilePath = null),
+                MusicTrackEntity("v:2", 2L, "v", "content://2", "Song 2", "A", "B", 100_000L, 1000L, 100L, "audio/mpeg", null, artworkFilePath = ""),
+                MusicTrackEntity("v:3", 3L, "v", "content://3", "Song 3", "A", "B", 100_000L, 1000L, 100L, "audio/mpeg", null, artworkFilePath = "/tmp/cover.jpg")
+            )
+        )
+
+        val missing = dao.tracksMissingArtwork(50)
+        assertEquals(listOf("v:1"), missing.map { it.trackKey })
+    }
+
+    @Test
+    fun observePlaylistIdsForTrackReturnsAllContainingPlaylists() = runTest {
+        val trackDao = db.musicTrackDao()
+        val playlistDao = db.playlistDao()
+        trackDao.upsertTracks(
+            listOf(MusicTrackEntity("v:1", 1L, "v", "content://1", "Song 1", "A", "B", 100_000L, 1000L, 100L, "audio/mpeg", null))
+        )
+        playlistDao.createPlaylistIfNameAvailable(PlaylistEntity(name = "Chill", createdAt = 1L, updatedAt = 1L))
+        playlistDao.createPlaylistIfNameAvailable(PlaylistEntity(name = "Drive", createdAt = 2L, updatedAt = 2L))
+        playlistDao.createPlaylistIfNameAvailable(PlaylistEntity(name = "Focus", createdAt = 3L, updatedAt = 3L))
+
+        val playlists = playlistDao.observePlaylists().first().associateBy({ it.playlist.name }, { it.playlist.playlistId })
+        val chillId = playlists.getValue("Chill")
+        val driveId = playlists.getValue("Drive")
+
+        playlistDao.addTrack(chillId, "v:1", 10L)
+        playlistDao.addTrack(driveId, "v:1", 11L)
+
+        val containing = playlistDao.observePlaylistIdsForTrack("v:1").first().toSet()
+        assertEquals(setOf(chillId, driveId), containing)
+
+        playlistDao.removeTrack(chillId, "v:1", 12L)
+        assertEquals(setOf(driveId), playlistDao.observePlaylistIdsForTrack("v:1").first().toSet())
+    }
 }

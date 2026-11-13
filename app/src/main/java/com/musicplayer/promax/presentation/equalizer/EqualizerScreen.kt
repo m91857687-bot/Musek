@@ -8,10 +8,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -25,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -35,7 +40,7 @@ import com.musicplayer.promax.presentation.components.PremiumScreenHeader
 import kotlin.math.roundToInt
 
 @Composable
-fun EqualizerScreen() {
+fun EqualizerScreen(onOpenSettings: (() -> Unit)? = null) {
     val manager by AudioEffectsBridge.manager.collectAsState()
     var bands by remember { mutableStateOf(manager?.bands().orEmpty()) }
     var bass by remember { mutableStateOf(manager?.bassStrength() ?: 0) }
@@ -56,7 +61,17 @@ fun EqualizerScreen() {
         PremiumScreenHeader(
             eyebrow = stringResource(R.string.sound_control),
             title = stringResource(R.string.equalizer),
-            subtitle = stringResource(R.string.equalizer_screen_subtitle)
+            subtitle = stringResource(R.string.equalizer_screen_subtitle),
+            trailingAction = onOpenSettings?.let { openSettings ->
+                {
+                    IconButton(
+                        onClick = openSettings,
+                        modifier = Modifier.testTag("equalizer_settings_button")
+                    ) {
+                        Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings))
+                    }
+                }
+            }
         )
 
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {

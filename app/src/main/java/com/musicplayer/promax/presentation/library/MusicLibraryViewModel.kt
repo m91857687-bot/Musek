@@ -33,6 +33,10 @@ class MusicLibraryViewModel(context: Context) : ViewModel() {
     private val metadataRepository = TrackMetadataRepository(appContext)
     private val workManager = WorkManager.getInstance(appContext)
 
+    init {
+        viewModelScope.launch { metadataRepository.prefetchMissingArtwork() }
+    }
+
     private val searchQuery = MutableStateFlow("")
     private val sortMode = MutableStateFlow(SORT_TITLE)
     private val favoritesOnly = MutableStateFlow(false)
@@ -150,6 +154,16 @@ class MusicLibraryViewModel(context: Context) : ViewModel() {
     fun removeTrackFromPlaylist(playlistId: Long, trackKey: String) {
         viewModelScope.launch { playlistDao.removeTrack(playlistId, trackKey, System.currentTimeMillis()) }
     }
+
+    fun setTrackInPlaylist(playlistId: Long, trackKey: String, included: Boolean) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            if (included) playlistDao.addTrack(playlistId, trackKey, now)
+            else playlistDao.removeTrack(playlistId, trackKey, now)
+        }
+    }
+
+    fun playlistIdsForTrack(trackKey: String) = playlistDao.observePlaylistIdsForTrack(trackKey)
 
     fun playlistTracks(playlistId: Long) = playlistDao.observePlaylistTracks(playlistId)
 

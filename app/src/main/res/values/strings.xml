@@ -170,4 +170,8 @@ starts here.</string>
     <string name="see_all">See all</string>
     <string name="ready_to_scan">Scan your device to start listening.</string>
     <string name="more_options">More options</string>
+    <string name="add_songs">Add songs</string>
+    <string name="repeat_this_song">Repeat this song</string>
+    <string name="repeating_song">Repeating</string>
+    <string name="done">Done</string>
 </resources>

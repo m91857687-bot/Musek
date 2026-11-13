@@ -7,6 +7,8 @@ import android.net.Uri
 import com.musicplayer.promax.data.local.MusicLibraryDatabase
 import com.musicplayer.promax.data.local.MusicTrackEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
@@ -18,7 +20,10 @@ class TrackMetadataRepository(context: Context) {
     private val artworkDirectory = File(appContext.filesDir, "album_artwork").apply { mkdirs() }
 
     suspend fun extractArtwork(track: MusicTrackEntity): String? = withContext(Dispatchers.IO) {
-        track.artworkFilePath?.takeIf { File(it).isFile }?.let { return@withContext it }
+        track.artworkFilePath?.let { existingPath ->
+            if (existingPath.isEmpty()) return@withContext null
+            if (File(existingPath).isFile) return@withContext existingPath
+        }
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(appContext, Uri.parse(track.contentUri))
@@ -27,11 +32,19 @@ class TrackMetadataRepository(context: Context) {
             val embeddedAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
             val embeddedDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             trackDao.updateEmbeddedMetadata(track.trackKey, embeddedTitle, embeddedArtist, embeddedAlbum, embeddedDuration)
-            val embedded = retriever.embeddedPicture ?: return@withContext null
-            if (embedded.size > MAX_ARTWORK_BYTES) return@withContext null
+            val embedded = retriever.embeddedPicture
+            if (embedded == null) {
+                trackDao.updateArtworkPath(track.trackKey, "")
+                return@withContext null
+            }
+            if (embedded.size > MAX_ARTWORK_BYTES) {
+                trackDao.updateArtworkPath(track.trackKey, "")
+                return@withContext null
+            }
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(embedded, 0, embedded.size, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || bounds.outWidth > 12_000 || bounds.outHeight > 12_000) {
+                trackDao.updateArtworkPath(track.trackKey, "")
                 return@withContext null
             }
             val decodeOptions = BitmapFactory.Options().apply {
@@ -39,7 +52,10 @@ class TrackMetadataRepository(context: Context) {
                 inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
             }
             val bitmap = BitmapFactory.decodeByteArray(embedded, 0, embedded.size, decodeOptions)
-                ?: return@withContext null
+            if (bitmap == null) {
+                trackDao.updateArtworkPath(track.trackKey, "")
+                return@withContext null
+            }
             val safeName = sha256(track.trackKey)
             val target = File(artworkDirectory, "$safeName.jpg")
             val temporary = File(artworkDirectory, "$safeName.tmp")
@@ -65,6 +81,14 @@ class TrackMetadataRepository(context: Context) {
             null
         } finally {
             runCatching { retriever.release() }
+        }
+    }
+
+    suspend fun prefetchMissingArtwork(limit: Int = 500) = withContext(Dispatchers.IO) {
+        val pending = trackDao.tracksMissingArtwork(limit)
+        for (track in pending) {
+            if (!currentCoroutineContext().isActive) break
+            extractArtwork(track)
         }
     }
 

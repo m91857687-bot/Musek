@@ -15,6 +15,9 @@ interface PlaylistDao {
     @Query("SELECT t.* FROM music_tracks t INNER JOIN playlist_tracks pt ON t.trackKey = pt.trackKey WHERE pt.playlistId = :playlistId ORDER BY pt.position ASC, pt.addedAt ASC")
     fun observePlaylistTracks(playlistId: Long): Flow<List<MusicTrackEntity>>
 
+    @Query("SELECT playlistId FROM playlist_tracks WHERE trackKey = :trackKey")
+    fun observePlaylistIdsForTrack(trackKey: String): Flow<List<Long>>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertPlaylist(playlist: PlaylistEntity): Long
 

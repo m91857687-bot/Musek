@@ -72,6 +72,9 @@ interface MusicTrackDao {
     @Query("UPDATE music_tracks SET lyricsLrc = :lyrics WHERE trackKey = :trackKey")
     suspend fun updateLyrics(trackKey: String, lyrics: String?)
 
+    @Query("SELECT * FROM music_tracks WHERE artworkFilePath IS NULL LIMIT :limit")
+    suspend fun tracksMissingArtwork(limit: Int = 500): List<MusicTrackEntity>
+
     @Query("SELECT COUNT(*) FROM music_tracks")
     fun observeTrackCount(): Flow<Int>
 

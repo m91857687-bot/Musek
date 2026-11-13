@@ -25,6 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,10 +41,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,10 +66,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import com.musicplayer.promax.data.local.MusicTrackEntity
 import com.musicplayer.promax.data.work.MusicIndexScheduler
 import com.musicplayer.promax.domain.model.AppLanguage
 import com.musicplayer.promax.navigation.AppDestination
 import com.musicplayer.promax.playback.PlaybackController
+import com.musicplayer.promax.presentation.components.PlaylistCheckboxDialog
 import com.musicplayer.promax.presentation.components.TrackArtworkBox
 import com.musicplayer.promax.presentation.equalizer.EqualizerScreen
 import com.musicplayer.promax.presentation.home.HomeScreen
@@ -79,13 +86,15 @@ import com.musicplayer.promax.presentation.statistics.StatisticsViewModel
 import com.musicplayer.promax.ui.theme.MusicPlayerProMaxTheme
 import com.musicplayer.promax.ui.theme.SubtleBorder
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOf
 
 @Composable
 fun MusicPlayerProMaxApp(
     settingsViewModel: SettingsViewModel,
     musicLibraryViewModel: MusicLibraryViewModel,
     statisticsViewModel: StatisticsViewModel,
-    playbackController: MediaController?
+    playbackController: MediaController?,
+    openNowPlayingSignal: Int = 0
 ) {
     val context = LocalContext.current
     val permissionName = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
@@ -151,20 +160,53 @@ fun MusicPlayerProMaxApp(
     val selectedDestination = selectedDestinationState.value
     val showNowPlaying = rememberSaveable { mutableStateOf(false) }
     val showInsights = rememberSaveable { mutableStateOf(false) }
+    val showSettings = rememberSaveable { mutableStateOf(false) }
     val focusSearchRequest = remember { mutableStateOf(false) }
+    var trackForPlaylistDialog by remember { mutableStateOf<MusicTrackEntity?>(null) }
+
+    LaunchedEffect(openNowPlayingSignal) {
+        if (openNowPlayingSignal > 0) {
+            showSettings.value = false
+            showInsights.value = false
+            showNowPlaying.value = true
+        }
+    }
+
     val activeTrackKeyState = remember(playbackController) {
         mutableStateOf(playbackController?.currentMediaItem?.mediaId)
+    }
+    val repeatModeState = remember(playbackController) {
+        mutableIntStateOf(playbackController?.repeatMode ?: Player.REPEAT_MODE_OFF)
     }
     DisposableEffect(playbackController) {
         val controller = playbackController ?: return@DisposableEffect onDispose {}
         activeTrackKeyState.value = controller.currentMediaItem?.mediaId
+        repeatModeState.intValue = controller.repeatMode
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
                 activeTrackKeyState.value = player.currentMediaItem?.mediaId
+                repeatModeState.intValue = player.repeatMode
             }
         }
         controller.addListener(listener)
         onDispose { controller.removeListener(listener) }
+    }
+
+    val repeatingTrackKey = if (repeatModeState.intValue == Player.REPEAT_MODE_ONE) activeTrackKeyState.value else null
+
+    val toggleRepeatForTrack: (List<MusicTrackEntity>, MusicTrackEntity) -> Unit = { queue, track ->
+        playbackController?.let { controller ->
+            if (controller.currentMediaItem?.mediaId == track.trackKey) {
+                controller.repeatMode = if (controller.repeatMode == Player.REPEAT_MODE_ONE) {
+                    Player.REPEAT_MODE_OFF
+                } else {
+                    Player.REPEAT_MODE_ONE
+                }
+            } else {
+                PlaybackController.playQueue(controller, queue, track)
+                controller.repeatMode = Player.REPEAT_MODE_ONE
+            }
+        }
     }
 
     val hasScanAccess = permissionState.value ||
@@ -172,6 +214,7 @@ fun MusicPlayerProMaxApp(
 
     BackHandler(enabled = showNowPlaying.value) { showNowPlaying.value = false }
     BackHandler(enabled = !showNowPlaying.value && showInsights.value) { showInsights.value = false }
+    BackHandler(enabled = !showNowPlaying.value && !showInsights.value && showSettings.value) { showSettings.value = false }
 
     LaunchedEffect(settingsState.isLoaded, language) {
         if (settingsState.isLoaded) {
@@ -205,9 +248,10 @@ fun MusicPlayerProMaxApp(
                     ) {
                         AppDestination.entries.forEach { destination ->
                             NavigationBarItem(
-                                selected = !showInsights.value && selectedDestination == destination,
+                                selected = !showInsights.value && !showSettings.value && selectedDestination == destination,
                                 onClick = {
                                     showInsights.value = false
+                                    showSettings.value = false
                                     selectedDestinationState.value = destination
                                 },
                                 icon = {
@@ -254,6 +298,35 @@ fun MusicPlayerProMaxApp(
                         )
                     }
                 }
+                showSettings.value -> {
+                    Box(modifier = Modifier.padding(innerPadding)) {
+                        SettingsScreen(
+                            selectedLanguage = language,
+                            selectedTheme = theme,
+                            selectedAccent = accent,
+                            sleepTimerEndMillis = settingsState.sleepTimerEndMillis,
+                            onLanguageSelected = settingsViewModel::selectLanguage,
+                            onThemeSelected = settingsViewModel::selectTheme,
+                            onAccentSelected = settingsViewModel::selectAccent,
+                            onSetSleepTimer = settingsViewModel::setSleepTimer,
+                            internalMusicEnabled = settingsState.internalMusicEnabled,
+                            externalMusicEnabled = settingsState.externalMusicEnabled,
+                            externalTreeUri = settingsState.externalTreeUri,
+                            onInternalMusicEnabledChanged = { enabled ->
+                                settingsViewModel.setInternalMusicEnabled(enabled) {
+                                    musicLibraryViewModel.scan()
+                                }
+                            },
+                            onExternalMusicEnabledChanged = { enabled ->
+                                settingsViewModel.setExternalMusicEnabled(enabled) {
+                                    musicLibraryViewModel.scan()
+                                }
+                            },
+                            onChooseExternalFolder = { folderPicker.launch(null) },
+                            onBack = { showSettings.value = false }
+                        )
+                    }
+                }
                 else -> Crossfade(
                     targetState = selectedDestination,
                     label = "main_navigation",
@@ -267,6 +340,7 @@ fun MusicPlayerProMaxApp(
                             playlistsCount = libraryState.playlists.size,
                             favoriteKeys = libraryState.favoriteKeys,
                             activeTrackKey = activeTrackKeyState.value,
+                            repeatingTrackKey = repeatingTrackKey,
                             recentTracks = libraryState.recentTracks,
                             favoriteTracks = libraryState.favoriteTracks,
                             onPlayTrack = { tracks, selected ->
@@ -275,6 +349,8 @@ fun MusicPlayerProMaxApp(
                                     showNowPlaying.value = true
                                 }
                             },
+                            onToggleRepeatTrack = toggleRepeatForTrack,
+                            onAddToPlaylist = { track -> trackForPlaylistDialog = track },
                             onToggleFavorite = musicLibraryViewModel::toggleFavorite,
                             onShufflePlay = {
                                 val tracks = libraryState.homeTracks
@@ -306,11 +382,12 @@ fun MusicPlayerProMaxApp(
                             },
                             onOpenPlaylists = { selectedDestinationState.value = AppDestination.PLAYLISTS },
                             onOpenInsights = { showInsights.value = true },
-                            onOpenSettings = { selectedDestinationState.value = AppDestination.SETTINGS }
+                            onOpenSettings = { showSettings.value = true }
                         )
                         AppDestination.LIBRARY -> LibraryScreen(
                             state = libraryState,
                             activeTrackKey = activeTrackKeyState.value,
+                            repeatingTrackKey = repeatingTrackKey,
                             focusSearchRequest = focusSearchRequest.value,
                             onSearchFocusConsumed = { focusSearchRequest.value = false },
                             hasAudioPermission = hasScanAccess,
@@ -320,6 +397,7 @@ fun MusicPlayerProMaxApp(
                                     showNowPlaying.value = true
                                 }
                             },
+                            onToggleRepeatTrack = { track -> toggleRepeatForTrack(libraryState.tracks, track) },
                             onScanClick = {
                                 if (hasScanAccess) musicLibraryViewModel.scan()
                                 else permissionLauncher.launch(permissionName)
@@ -328,51 +406,53 @@ fun MusicPlayerProMaxApp(
                             onSortChanged = musicLibraryViewModel::setSortMode,
                             onFavoritesOnlyChanged = musicLibraryViewModel::setFavoritesOnly,
                             onToggleFavorite = musicLibraryViewModel::toggleFavorite,
-                            onAddToPlaylist = musicLibraryViewModel::addTrackToPlaylist,
+                            onAddToPlaylistRequest = { track -> trackForPlaylistDialog = track },
                             onUpdateMetadata = musicLibraryViewModel::updateTrackMetadata,
                             onImportLyrics = { trackKey ->
                                 lyricsTrackKey.value = trackKey
                                 lyricsPicker.launch(arrayOf("text/*", "application/octet-stream"))
-                            }
+                            },
+                            onOpenSettings = { showSettings.value = true }
                         )
                         AppDestination.PLAYLISTS -> PlaylistsScreen(
                             state = libraryState,
                             viewModel = musicLibraryViewModel,
+                            activeTrackKey = activeTrackKeyState.value,
+                            repeatingTrackKey = repeatingTrackKey,
                             onPlayTrack = { tracks, selected ->
                                 playbackController?.let { controller ->
                                     PlaybackController.playQueue(controller, tracks, selected)
                                     showNowPlaying.value = true
                                 }
-                            }
+                            },
+                            onToggleRepeatTrack = toggleRepeatForTrack,
+                            onOpenSettings = { showSettings.value = true }
                         )
-                        AppDestination.EQUALIZER -> EqualizerScreen()
-                        AppDestination.SETTINGS -> SettingsScreen(
-                            selectedLanguage = language,
-                            selectedTheme = theme,
-                            selectedAccent = accent,
-                            sleepTimerEndMillis = settingsState.sleepTimerEndMillis,
-                            onLanguageSelected = settingsViewModel::selectLanguage,
-                            onThemeSelected = settingsViewModel::selectTheme,
-                            onAccentSelected = settingsViewModel::selectAccent,
-                            onSetSleepTimer = settingsViewModel::setSleepTimer,
-                            internalMusicEnabled = settingsState.internalMusicEnabled,
-                            externalMusicEnabled = settingsState.externalMusicEnabled,
-                            externalTreeUri = settingsState.externalTreeUri,
-                            onInternalMusicEnabledChanged = { enabled ->
-                                settingsViewModel.setInternalMusicEnabled(enabled) {
-                                    musicLibraryViewModel.scan()
-                                }
-                            },
-                            onExternalMusicEnabledChanged = { enabled ->
-                                settingsViewModel.setExternalMusicEnabled(enabled) {
-                                    musicLibraryViewModel.scan()
-                                }
-                            },
-                            onChooseExternalFolder = { folderPicker.launch(null) }
+                        AppDestination.EQUALIZER -> EqualizerScreen(
+                            onOpenSettings = { showSettings.value = true }
                         )
                     }
                 }
             }
+        }
+
+        trackForPlaylistDialog?.let { track ->
+            val playlistIdsFlow = remember(track.trackKey) {
+                musicLibraryViewModel.playlistIdsForTrack(track.trackKey)
+            }
+            val includedIds by playlistIdsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+            PlaylistCheckboxDialog(
+                track = track,
+                playlists = libraryState.playlists,
+                includedPlaylistIds = includedIds.toSet(),
+                onTogglePlaylist = { playlistId, included ->
+                    musicLibraryViewModel.setTrackInPlaylist(playlistId, track.trackKey, included)
+                },
+                onCreatePlaylist = { name, onResult ->
+                    musicLibraryViewModel.createPlaylist(name, onResult)
+                },
+                onDismiss = { trackForPlaylistDialog = null }
+            )
         }
     }
 }
@@ -448,6 +528,22 @@ private fun MiniPlayer(controller: MediaController, artworkPath: String?, onExpa
                     )
                 }
                 IconButton(
+                    onClick = {
+                        controller.repeatMode = if (controller.repeatMode == Player.REPEAT_MODE_ONE) {
+                            Player.REPEAT_MODE_OFF
+                        } else {
+                            Player.REPEAT_MODE_ONE
+                        }
+                    },
+                    modifier = Modifier.testTag("mini_player_repeat_one")
+                ) {
+                    Icon(
+                        imageVector = if (state.repeatOneEnabled) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
+                        contentDescription = stringResource(R.string.repeat_this_song),
+                        tint = if (state.repeatOneEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(
                     onClick = { if (controller.isPlaying) controller.pause() else controller.play() },
                     modifier = Modifier.testTag("mini_player_play_pause")
                 ) {
@@ -476,6 +572,7 @@ private data class MiniPlayerState(
     val title: String,
     val artist: String,
     val isPlaying: Boolean,
+    val repeatOneEnabled: Boolean,
     val durationMs: Long
 )
 
@@ -486,6 +583,7 @@ private fun readPlayerState(player: Player): MiniPlayerState {
         title = metadata?.title?.toString().orEmpty(),
         artist = metadata?.artist?.toString().orEmpty(),
         isPlaying = player.isPlaying,
+        repeatOneEnabled = player.repeatMode == Player.REPEAT_MODE_ONE,
         durationMs = duration.coerceAtLeast(0L)
     )
 }

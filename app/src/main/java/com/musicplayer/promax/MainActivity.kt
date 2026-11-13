@@ -1,6 +1,7 @@
 package com.musicplayer.promax
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.os.Build
@@ -11,11 +12,12 @@ import android.provider.MediaStore
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.media3.session.MediaController
 import com.musicplayer.promax.playback.PlaybackController
-import androidx.compose.runtime.mutableStateOf
 import com.google.common.util.concurrent.ListenableFuture
 import com.musicplayer.promax.data.preferences.DataStoreUserPreferencesRepository
 import com.musicplayer.promax.data.work.MusicIndexScheduler
@@ -30,10 +32,12 @@ class MainActivity : AppCompatActivity() {
     private var controllerFuture: ListenableFuture<MediaController>? = null
     @Volatile private var activityDestroyed = false
     private val playbackController = mutableStateOf<MediaController?>(null)
+    private val openNowPlayingSignal = mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        handleLaunchIntent(intent)
 
         val audioPermission = audioPermissionName()
         if (ContextCompat.checkSelfPermission(this, audioPermission) == PackageManager.PERMISSION_GRANTED) {
@@ -70,8 +74,22 @@ class MainActivity : AppCompatActivity() {
                 settingsViewModel = settingsViewModel,
                 musicLibraryViewModel = libraryViewModel,
                 statisticsViewModel = statisticsViewModel,
-                playbackController = playbackController.value
+                playbackController = playbackController.value,
+                openNowPlayingSignal = openNowPlayingSignal.intValue
             )
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleLaunchIntent(intent)
+    }
+
+    private fun handleLaunchIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_OPEN_NOW_PLAYING, false) == true) {
+            intent.removeExtra(EXTRA_OPEN_NOW_PLAYING)
+            openNowPlayingSignal.intValue += 1
         }
     }
 
@@ -132,5 +150,9 @@ class MainActivity : AppCompatActivity() {
         mediaObserver = null
         pendingIndexRunnable?.let(mainHandler::removeCallbacks)
         pendingIndexRunnable = null
+    }
+
+    companion object {
+        const val EXTRA_OPEN_NOW_PLAYING = "com.musicplayer.promax.extra.OPEN_NOW_PLAYING"
     }
 }
