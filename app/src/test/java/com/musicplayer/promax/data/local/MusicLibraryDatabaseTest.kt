@@ -150,4 +150,52 @@ class MusicLibraryDatabaseTest {
             dbFile.delete()
         }
     }
+
+    @Test
+    fun observeLibraryTracksSearchMatchesOverridesAndIgnoresEmptyOverrides() = runTest {
+        val dao = db.musicTrackDao()
+        dao.upsertTracks(
+            listOf(
+                MusicTrackEntity(
+                    trackKey = "v:1",
+                    mediaStoreId = 1L,
+                    volumeName = "v",
+                    contentUri = "content://1",
+                    title = "Midnight Echo",
+                    artist = "Aria",
+                    album = "Skyline",
+                    durationMs = 180_000L,
+                    sizeBytes = 3_000L,
+                    dateModifiedSeconds = 100L,
+                    mimeType = "audio/mpeg",
+                    relativePath = null,
+                    titleOverride = ""
+                ),
+                MusicTrackEntity(
+                    trackKey = "v:2",
+                    mediaStoreId = 2L,
+                    volumeName = "v",
+                    contentUri = "content://2",
+                    title = "Track 02",
+                    artist = "Unknown",
+                    album = "Demos",
+                    durationMs = 200_000L,
+                    sizeBytes = 4_000L,
+                    dateModifiedSeconds = 200L,
+                    mimeType = "audio/mpeg",
+                    relativePath = null,
+                    titleOverride = "Desert Breeze"
+                )
+            )
+        )
+
+        val matchByOriginalWithEmptyOverride = dao.observeLibraryTracks("midnight", "TITLE", false).first()
+        assertEquals(listOf("v:1"), matchByOriginalWithEmptyOverride.map { it.trackKey })
+
+        val matchByOverride = dao.observeLibraryTracks("breeze", "TITLE", false).first()
+        assertEquals(listOf("v:2"), matchByOverride.map { it.trackKey })
+
+        val matchByArtist = dao.observeLibraryTracks("aria", "TITLE", false).first()
+        assertEquals(listOf("v:1"), matchByArtist.map { it.trackKey })
+    }
 }

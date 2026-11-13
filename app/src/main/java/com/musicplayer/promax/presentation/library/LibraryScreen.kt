@@ -12,16 +12,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -38,18 +36,25 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.musicplayer.promax.R
 import com.musicplayer.promax.data.local.MusicTrackEntity
 import com.musicplayer.promax.data.local.PlaylistWithCount
+import com.musicplayer.promax.presentation.components.EditorialTrackRow
 import com.musicplayer.promax.presentation.components.FeatureEmptyState
 import com.musicplayer.promax.presentation.components.PremiumScreenHeader
 import com.musicplayer.promax.ui.theme.SecondaryText
@@ -58,6 +63,9 @@ import com.musicplayer.promax.ui.theme.SubtleBorder
 @Composable
 fun LibraryScreen(
     state: LibraryUiState,
+    activeTrackKey: String? = null,
+    focusSearchRequest: Boolean = false,
+    onSearchFocusConsumed: () -> Unit = {},
     onScanClick: () -> Unit,
     hasAudioPermission: Boolean,
     onTrackClick: (MusicTrackEntity) -> Unit,
@@ -72,6 +80,14 @@ fun LibraryScreen(
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var trackForPlaylist by remember { mutableStateOf<MusicTrackEntity?>(null) }
     var trackForEdit by remember { mutableStateOf<MusicTrackEntity?>(null) }
+    val searchFocusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(focusSearchRequest, state.trackCount) {
+        if (focusSearchRequest && state.trackCount > 0) {
+            runCatching { searchFocusRequester.requestFocus() }
+            onSearchFocusConsumed()
+        }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 22.dp, vertical = 24.dp),
@@ -114,10 +130,28 @@ fun LibraryScreen(
                 OutlinedTextField(
                     value = state.searchQuery,
                     onValueChange = onSearchChanged,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(searchFocusRequester)
+                        .testTag("library_search_input"),
                     singleLine = true,
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (state.searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { onSearchChanged("") },
+                                modifier = Modifier.testTag("library_search_clear")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = stringResource(R.string.cancel)
+                                )
+                            }
+                        }
+                    },
                     placeholder = { Text(stringResource(R.string.search_music)) },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
                     shape = RoundedCornerShape(16.dp)
                 )
             }
@@ -127,7 +161,7 @@ fun LibraryScreen(
                     FilterPill(text = stringResource(R.string.favorites), selected = state.favoritesOnly) { onFavoritesOnlyChanged(true) }
                     androidx.compose.foundation.layout.Box {
                         androidx.compose.material3.OutlinedButton(onClick = { sortMenuExpanded = true }) {
-                            Icon(Icons.Filled.Sort, contentDescription = null)
+                            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null)
                             Text(stringResource(R.string.sort))
                         }
                         DropdownMenu(expanded = sortMenuExpanded, onDismissRequest = { sortMenuExpanded = false }) {
@@ -172,8 +206,9 @@ fun LibraryScreen(
                 )
             }
             items(state.tracks, key = { it.trackKey }) { track ->
-                TrackListItem(
+                EditorialTrackRow(
                     track = track,
+                    isCurrentTrack = track.trackKey == activeTrackKey,
                     isFavorite = track.trackKey in state.favoriteKeys,
                     onClick = { onTrackClick(track) },
                     onToggleFavorite = { onToggleFavorite(track.trackKey) },
@@ -222,52 +257,6 @@ private fun SortOption(label: Int, value: String, selected: String, onClick: (St
     DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { onClick(value) }, trailingIcon = {
         if (selected == value) Text("✓", color = MaterialTheme.colorScheme.primary)
     })
-}
-
-@Composable
-private fun TrackListItem(
-    track: MusicTrackEntity,
-    isFavorite: Boolean,
-    onClick: () -> Unit,
-    onToggleFavorite: () -> Unit,
-    onAddToPlaylist: () -> Unit,
-    onEditMetadata: () -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, SubtleBorder)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.13f)) {
-                Icon(Icons.Filled.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(11.dp))
-            }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(track.displayTitle, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                Text(
-                    text = listOf(track.displayArtist.ifBlank { "—" }, track.displayAlbum.ifBlank { "—" }).joinToString(" • "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SecondaryText,
-                    maxLines = 1
-                )
-            }
-            Text(if (track.durationMs > 0L) formatDuration(track.durationMs) else "", style = MaterialTheme.typography.labelSmall, color = SecondaryText)
-            IconButton(onClick = onToggleFavorite) {
-                Icon(if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, contentDescription = stringResource(R.string.favorites), tint = if (isFavorite) MaterialTheme.colorScheme.primary else SecondaryText)
-            }
-            IconButton(onClick = onEditMetadata) {
-                Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.edit_track_metadata), tint = SecondaryText)
-            }
-            IconButton(onClick = onAddToPlaylist) {
-                Icon(Icons.Filled.PlaylistAdd, contentDescription = stringResource(R.string.add_to_playlist), tint = SecondaryText)
-            }
-        }
-    }
 }
 
 @Composable

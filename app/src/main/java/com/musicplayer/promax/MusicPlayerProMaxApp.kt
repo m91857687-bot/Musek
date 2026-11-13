@@ -9,17 +9,26 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -30,12 +39,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,23 +58,27 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.musicplayer.promax.data.work.MusicIndexScheduler
 import com.musicplayer.promax.domain.model.AppLanguage
 import com.musicplayer.promax.navigation.AppDestination
 import com.musicplayer.promax.playback.PlaybackController
+import com.musicplayer.promax.presentation.components.TrackArtworkBox
 import com.musicplayer.promax.presentation.equalizer.EqualizerScreen
 import com.musicplayer.promax.presentation.home.HomeScreen
 import com.musicplayer.promax.presentation.library.LibraryScreen
 import com.musicplayer.promax.presentation.library.MusicLibraryViewModel
-import com.musicplayer.promax.presentation.playlists.PlaylistsScreen
 import com.musicplayer.promax.presentation.player.NowPlayingScreen
+import com.musicplayer.promax.presentation.playlists.PlaylistsScreen
 import com.musicplayer.promax.presentation.settings.SettingsScreen
 import com.musicplayer.promax.presentation.settings.SettingsViewModel
-import com.musicplayer.promax.presentation.statistics.StatisticsViewModel
 import com.musicplayer.promax.presentation.statistics.StatisticsScreen
+import com.musicplayer.promax.presentation.statistics.StatisticsViewModel
 import com.musicplayer.promax.ui.theme.MusicPlayerProMaxTheme
+import com.musicplayer.promax.ui.theme.SubtleBorder
+import kotlinx.coroutines.delay
 
 @Composable
 fun MusicPlayerProMaxApp(
@@ -75,7 +91,7 @@ fun MusicPlayerProMaxApp(
     val permissionName = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
     else Manifest.permission.READ_EXTERNAL_STORAGE
     val permissionInitiallyGranted = ContextCompat.checkSelfPermission(context, permissionName) == PackageManager.PERMISSION_GRANTED
-    val permissionState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(permissionInitiallyGranted) }
+    val permissionState = remember { mutableStateOf(permissionInitiallyGranted) }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permissionState.value = granted
         if (granted) {
@@ -130,12 +146,32 @@ fun MusicPlayerProMaxApp(
     val accent = settingsState.accent
     val statisticsState = statisticsViewModel.state.collectAsStateWithLifecycle().value
     val selectedDestinationState = rememberSaveable {
-        androidx.compose.runtime.mutableStateOf(AppDestination.HOME)
+        mutableStateOf(AppDestination.HOME)
     }
     val selectedDestination = selectedDestinationState.value
     val showNowPlaying = rememberSaveable { mutableStateOf(false) }
+    val showInsights = rememberSaveable { mutableStateOf(false) }
+    val focusSearchRequest = remember { mutableStateOf(false) }
+    val activeTrackKeyState = remember(playbackController) {
+        mutableStateOf(playbackController?.currentMediaItem?.mediaId)
+    }
+    DisposableEffect(playbackController) {
+        val controller = playbackController ?: return@DisposableEffect onDispose {}
+        activeTrackKeyState.value = controller.currentMediaItem?.mediaId
+        val listener = object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                activeTrackKeyState.value = player.currentMediaItem?.mediaId
+            }
+        }
+        controller.addListener(listener)
+        onDispose { controller.removeListener(listener) }
+    }
+
+    val hasScanAccess = permissionState.value ||
+        (!settingsState.internalMusicEnabled && settingsState.externalMusicEnabled && settingsState.externalTreeUri != null)
 
     BackHandler(enabled = showNowPlaying.value) { showNowPlaying.value = false }
+    BackHandler(enabled = !showNowPlaying.value && showInsights.value) { showInsights.value = false }
 
     LaunchedEffect(settingsState.isLoaded, language) {
         if (settingsState.isLoaded) {
@@ -156,188 +192,300 @@ fun MusicPlayerProMaxApp(
             bottomBar = {
                 if (!showNowPlaying.value) Column {
                     playbackController?.let { controller ->
-                        MiniPlayer(controller = controller, onExpand = { showNowPlaying.value = true })
-                    }
-                    NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 0.dp
-                ) {
-                    AppDestination.entries.forEach { destination ->
-                        NavigationBarItem(
-                            selected = selectedDestination == destination,
-                            onClick = { selectedDestinationState.value = destination },
-                            icon = {
-                                androidx.compose.material3.Icon(
-                                    imageVector = destination.icon,
-                                    contentDescription = stringResource(destination.labelRes)
-                                )
-                            },
-                            label = {
-                                Text(
-                                    text = stringResource(destination.labelRes),
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            },
-                            alwaysShowLabel = true,
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.primary,
-                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                                indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.13f),
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        val activeArtwork = libraryState.homeTracks.firstOrNull { it.trackKey == activeTrackKeyState.value }?.artworkFilePath
+                        MiniPlayer(
+                            controller = controller,
+                            artworkPath = activeArtwork,
+                            onExpand = { showNowPlaying.value = true }
                         )
                     }
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 0.dp
+                    ) {
+                        AppDestination.entries.forEach { destination ->
+                            NavigationBarItem(
+                                selected = !showInsights.value && selectedDestination == destination,
+                                onClick = {
+                                    showInsights.value = false
+                                    selectedDestinationState.value = destination
+                                },
+                                icon = {
+                                    Icon(
+                                        imageVector = destination.icon,
+                                        contentDescription = stringResource(destination.labelRes)
+                                    )
+                                },
+                                label = {
+                                    Text(
+                                        text = stringResource(destination.labelRes),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                alwaysShowLabel = true,
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            )
+                        }
                     }
                 }
             }
         ) { innerPadding ->
-            if (showNowPlaying.value && playbackController != null) {
-                NowPlayingScreen(controller = playbackController, onBack = { showNowPlaying.value = false }, modifier = Modifier.padding(innerPadding))
-            } else Crossfade(
-                targetState = selectedDestination,
-                label = "main_navigation",
-                modifier = Modifier.padding(innerPadding)
-            ) { destination ->
-                when (destination) {
-                    AppDestination.HOME -> HomeScreen(
-                        recentTracks = libraryState.recentTracks,
-                        favoriteTracks = libraryState.favoriteTracks,
-                        onPlayTrack = { tracks, selected ->
-                            playbackController?.let { controller ->
-                                PlaybackController.playQueue(controller, tracks, selected)
-                                showNowPlaying.value = true
-                            }
-                        },
-                        onOpenLibrary = { selectedDestinationState.value = AppDestination.LIBRARY },
-                        onOpenSettings = { selectedDestinationState.value = AppDestination.SETTINGS }
+            when {
+                showNowPlaying.value && playbackController != null -> {
+                    NowPlayingScreen(
+                        controller = playbackController,
+                        onBack = { showNowPlaying.value = false },
+                        modifier = Modifier.padding(innerPadding)
                     )
-                    AppDestination.LIBRARY -> LibraryScreen(
-                        state = libraryState,
-                        hasAudioPermission = permissionState.value ||
-                            (!settingsState.internalMusicEnabled && settingsState.externalMusicEnabled && settingsState.externalTreeUri != null),
-                        onTrackClick = { track ->
-                            playbackController?.let { controller ->
-                                PlaybackController.playQueue(controller, libraryState.tracks, track)
-                                showNowPlaying.value = true
+                }
+                showInsights.value -> {
+                    Box(modifier = Modifier.padding(innerPadding)) {
+                        StatisticsScreen(
+                            state = statisticsState,
+                            onBack = { showInsights.value = false }
+                        )
+                    }
+                }
+                else -> Crossfade(
+                    targetState = selectedDestination,
+                    label = "main_navigation",
+                    modifier = Modifier.padding(innerPadding)
+                ) { destination ->
+                    when (destination) {
+                        AppDestination.HOME -> HomeScreen(
+                            allTracks = libraryState.homeTracks,
+                            totalTracksCount = libraryState.trackCount,
+                            favoritesCount = libraryState.favoriteKeys.size,
+                            playlistsCount = libraryState.playlists.size,
+                            favoriteKeys = libraryState.favoriteKeys,
+                            activeTrackKey = activeTrackKeyState.value,
+                            recentTracks = libraryState.recentTracks,
+                            favoriteTracks = libraryState.favoriteTracks,
+                            onPlayTrack = { tracks, selected ->
+                                playbackController?.let { controller ->
+                                    PlaybackController.playQueue(controller, tracks, selected)
+                                    showNowPlaying.value = true
+                                }
+                            },
+                            onToggleFavorite = musicLibraryViewModel::toggleFavorite,
+                            onShufflePlay = {
+                                val tracks = libraryState.homeTracks
+                                if (tracks.isNotEmpty()) {
+                                    val shuffled = tracks.shuffled()
+                                    playbackController?.let { controller ->
+                                        controller.shuffleModeEnabled = true
+                                        PlaybackController.playQueue(controller, shuffled, shuffled.first())
+                                        showNowPlaying.value = true
+                                    }
+                                }
+                            },
+                            onScanMusic = {
+                                if (hasScanAccess) musicLibraryViewModel.scan()
+                                else permissionLauncher.launch(permissionName)
+                            },
+                            onOpenLibrary = {
+                                musicLibraryViewModel.setFavoritesOnly(false)
+                                selectedDestinationState.value = AppDestination.LIBRARY
+                            },
+                            onOpenSearch = {
+                                musicLibraryViewModel.setFavoritesOnly(false)
+                                focusSearchRequest.value = true
+                                selectedDestinationState.value = AppDestination.LIBRARY
+                            },
+                            onOpenFavorites = {
+                                musicLibraryViewModel.setFavoritesOnly(true)
+                                selectedDestinationState.value = AppDestination.LIBRARY
+                            },
+                            onOpenPlaylists = { selectedDestinationState.value = AppDestination.PLAYLISTS },
+                            onOpenInsights = { showInsights.value = true },
+                            onOpenSettings = { selectedDestinationState.value = AppDestination.SETTINGS }
+                        )
+                        AppDestination.LIBRARY -> LibraryScreen(
+                            state = libraryState,
+                            activeTrackKey = activeTrackKeyState.value,
+                            focusSearchRequest = focusSearchRequest.value,
+                            onSearchFocusConsumed = { focusSearchRequest.value = false },
+                            hasAudioPermission = hasScanAccess,
+                            onTrackClick = { track ->
+                                playbackController?.let { controller ->
+                                    PlaybackController.playQueue(controller, libraryState.tracks, track)
+                                    showNowPlaying.value = true
+                                }
+                            },
+                            onScanClick = {
+                                if (hasScanAccess) musicLibraryViewModel.scan()
+                                else permissionLauncher.launch(permissionName)
+                            },
+                            onSearchChanged = musicLibraryViewModel::setSearchQuery,
+                            onSortChanged = musicLibraryViewModel::setSortMode,
+                            onFavoritesOnlyChanged = musicLibraryViewModel::setFavoritesOnly,
+                            onToggleFavorite = musicLibraryViewModel::toggleFavorite,
+                            onAddToPlaylist = musicLibraryViewModel::addTrackToPlaylist,
+                            onUpdateMetadata = musicLibraryViewModel::updateTrackMetadata,
+                            onImportLyrics = { trackKey ->
+                                lyricsTrackKey.value = trackKey
+                                lyricsPicker.launch(arrayOf("text/*", "application/octet-stream"))
                             }
-                        },
-                        onScanClick = {
-                            if (permissionState.value ||
-                                (!settingsState.internalMusicEnabled && settingsState.externalMusicEnabled && settingsState.externalTreeUri != null)
-                            ) musicLibraryViewModel.scan()
-                            else permissionLauncher.launch(permissionName)
-                        },
-                        onSearchChanged = musicLibraryViewModel::setSearchQuery,
-                        onSortChanged = musicLibraryViewModel::setSortMode,
-                        onFavoritesOnlyChanged = musicLibraryViewModel::setFavoritesOnly,
-                        onToggleFavorite = musicLibraryViewModel::toggleFavorite,
-                        onAddToPlaylist = musicLibraryViewModel::addTrackToPlaylist,
-                        onUpdateMetadata = musicLibraryViewModel::updateTrackMetadata,
-                        onImportLyrics = { trackKey ->
-                            lyricsTrackKey.value = trackKey
-                            lyricsPicker.launch(arrayOf("text/*", "application/octet-stream"))
-                        }
-                    )
-                    AppDestination.PLAYLISTS -> PlaylistsScreen(
-                        state = libraryState,
-                        viewModel = musicLibraryViewModel,
-                        onPlayTrack = { tracks, selected ->
-                            playbackController?.let { controller ->
-                                PlaybackController.playQueue(controller, tracks, selected)
-                                showNowPlaying.value = true
+                        )
+                        AppDestination.PLAYLISTS -> PlaylistsScreen(
+                            state = libraryState,
+                            viewModel = musicLibraryViewModel,
+                            onPlayTrack = { tracks, selected ->
+                                playbackController?.let { controller ->
+                                    PlaybackController.playQueue(controller, tracks, selected)
+                                    showNowPlaying.value = true
+                                }
                             }
-                        }
-                    )
-                    AppDestination.EQUALIZER -> EqualizerScreen()
-                    AppDestination.STATISTICS -> StatisticsScreen(statisticsState)
-                    AppDestination.SETTINGS -> SettingsScreen(
-                        selectedLanguage = language,
-                        selectedTheme = theme,
-                        selectedAccent = accent,
-                        sleepTimerEndMillis = settingsState.sleepTimerEndMillis,
-                        onLanguageSelected = settingsViewModel::selectLanguage,
-                        onThemeSelected = settingsViewModel::selectTheme,
-                        onAccentSelected = settingsViewModel::selectAccent,
-                        onSetSleepTimer = settingsViewModel::setSleepTimer,
-                        internalMusicEnabled = settingsState.internalMusicEnabled,
-                        externalMusicEnabled = settingsState.externalMusicEnabled,
-                        externalTreeUri = settingsState.externalTreeUri,
-                        onInternalMusicEnabledChanged = { enabled ->
-                            settingsViewModel.setInternalMusicEnabled(enabled) {
-                                musicLibraryViewModel.scan()
-                            }
-                        },
-                        onExternalMusicEnabledChanged = { enabled ->
-                            settingsViewModel.setExternalMusicEnabled(enabled) {
-                                musicLibraryViewModel.scan()
-                            }
-                        },
-                        onChooseExternalFolder = { folderPicker.launch(null) }
-                    )
+                        )
+                        AppDestination.EQUALIZER -> EqualizerScreen()
+                        AppDestination.SETTINGS -> SettingsScreen(
+                            selectedLanguage = language,
+                            selectedTheme = theme,
+                            selectedAccent = accent,
+                            sleepTimerEndMillis = settingsState.sleepTimerEndMillis,
+                            onLanguageSelected = settingsViewModel::selectLanguage,
+                            onThemeSelected = settingsViewModel::selectTheme,
+                            onAccentSelected = settingsViewModel::selectAccent,
+                            onSetSleepTimer = settingsViewModel::setSleepTimer,
+                            internalMusicEnabled = settingsState.internalMusicEnabled,
+                            externalMusicEnabled = settingsState.externalMusicEnabled,
+                            externalTreeUri = settingsState.externalTreeUri,
+                            onInternalMusicEnabledChanged = { enabled ->
+                                settingsViewModel.setInternalMusicEnabled(enabled) {
+                                    musicLibraryViewModel.scan()
+                                }
+                            },
+                            onExternalMusicEnabledChanged = { enabled ->
+                                settingsViewModel.setExternalMusicEnabled(enabled) {
+                                    musicLibraryViewModel.scan()
+                                }
+                            },
+                            onChooseExternalFolder = { folderPicker.launch(null) }
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-
-@androidx.compose.runtime.Composable
-private fun MiniPlayer(controller: MediaController, onExpand: () -> Unit) {
+@Composable
+private fun MiniPlayer(controller: MediaController, artworkPath: String?, onExpand: () -> Unit) {
     val playerState = remember(controller) { mutableStateOf(readPlayerState(controller)) }
+    val positionMs = remember(controller) { mutableLongStateOf(controller.currentPosition.coerceAtLeast(0L)) }
+
     DisposableEffect(controller) {
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
                 playerState.value = readPlayerState(player)
+                positionMs.longValue = player.currentPosition.coerceAtLeast(0L)
             }
         }
         controller.addListener(listener)
         onDispose { controller.removeListener(listener) }
     }
+
     val state = playerState.value
+    LaunchedEffect(controller, state.isPlaying) {
+        while (state.isPlaying) {
+            positionMs.longValue = controller.currentPosition.coerceAtLeast(0L)
+            delay(500L)
+        }
+    }
+
     if (state.title.isBlank()) return
+    val progress = if (state.durationMs > 0L) (positionMs.longValue.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+
     Surface(
         onClick = onExpand,
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, SubtleBorder),
         tonalElevation = 4.dp,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .testTag("mini_player_card")
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(state.title, maxLines = 1, fontWeight = FontWeight.SemiBold)
-                Text(state.artist, maxLines = 1, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            IconButton(onClick = { if (controller.isPlaying) controller.pause() else controller.play() }) {
-                Icon(
-                    if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = stringResource(R.string.accessibility_play_pause),
-                    tint = MaterialTheme.colorScheme.primary
+        Column {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.5.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = SubtleBorder
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TrackArtworkBox(
+                    artworkPath = artworkPath,
+                    size = 38.dp,
+                    cornerRadius = 10.dp,
+                    isCurrentTrack = state.isPlaying
                 )
-            }
-            IconButton(onClick = controller::seekToNext) {
-                Icon(
-                    Icons.Filled.SkipNext,
-                    contentDescription = stringResource(R.string.accessibility_next_track),
-                    tint = MaterialTheme.colorScheme.primary
-                )
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(state.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        state.artist.ifBlank { stringResource(R.string.unknown_artist) },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(
+                    onClick = { if (controller.isPlaying) controller.pause() else controller.play() },
+                    modifier = Modifier.testTag("mini_player_play_pause")
+                ) {
+                    Icon(
+                        if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = stringResource(R.string.accessibility_play_pause),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                IconButton(
+                    onClick = controller::seekToNextMediaItem,
+                    modifier = Modifier.testTag("mini_player_next")
+                ) {
+                    Icon(
+                        Icons.Filled.SkipNext,
+                        contentDescription = stringResource(R.string.accessibility_next_track),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
     }
 }
 
-private data class MiniPlayerState(val title: String, val artist: String, val isPlaying: Boolean)
+private data class MiniPlayerState(
+    val title: String,
+    val artist: String,
+    val isPlaying: Boolean,
+    val durationMs: Long
+)
 
 private fun readPlayerState(player: Player): MiniPlayerState {
     val metadata = player.currentMediaItem?.mediaMetadata
+    val duration = player.duration.takeUnless { it == C.TIME_UNSET } ?: 0L
     return MiniPlayerState(
         title = metadata?.title?.toString().orEmpty(),
         artist = metadata?.artist?.toString().orEmpty(),
-        isPlaying = player.isPlaying
+        isPlaying = player.isPlaying,
+        durationMs = duration.coerceAtLeast(0L)
     )
 }

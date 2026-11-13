@@ -1,10 +1,12 @@
 package com.musicplayer.promax.presentation.home
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,334 +14,577 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Album
-import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.History
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.musicplayer.promax.R
-import com.musicplayer.promax.presentation.components.FeatureEmptyState
-import com.musicplayer.promax.ui.theme.ElevatedBlack
+import com.musicplayer.promax.data.local.MusicTrackEntity
+import com.musicplayer.promax.presentation.components.EditorialTrackRow
+import com.musicplayer.promax.presentation.components.TrackArtworkBox
 import com.musicplayer.promax.ui.theme.SecondaryText
 import com.musicplayer.promax.ui.theme.SubtleBorder
 
-import androidx.compose.foundation.clickable
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.ui.text.style.TextOverflow
-import com.musicplayer.promax.data.local.MusicTrackEntity
+private const val HOME_PREVIEW_SONG_LIMIT = 15
 
 @Composable
 fun HomeScreen(
+    allTracks: List<MusicTrackEntity> = emptyList(),
+    totalTracksCount: Int = allTracks.size,
+    favoritesCount: Int = 0,
+    playlistsCount: Int = 0,
+    favoriteKeys: Set<String> = emptySet(),
+    activeTrackKey: String? = null,
     recentTracks: List<MusicTrackEntity> = emptyList(),
     favoriteTracks: List<MusicTrackEntity> = emptyList(),
     onPlayTrack: (List<MusicTrackEntity>, MusicTrackEntity) -> Unit = { _, _ -> },
+    onToggleFavorite: (String) -> Unit = {},
+    onShufflePlay: () -> Unit = {},
+    onScanMusic: () -> Unit = {},
     onOpenLibrary: () -> Unit,
+    onOpenSearch: () -> Unit = onOpenLibrary,
+    onOpenFavorites: () -> Unit = onOpenLibrary,
+    onOpenPlaylists: () -> Unit = onOpenLibrary,
+    onOpenInsights: () -> Unit = {},
     onOpenSettings: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(25.dp)
+    val homePreviewTracks = allTracks.take(HOME_PREVIEW_SONG_LIMIT)
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
     ) {
-        HomeHeader(onOpenSettings = onOpenSettings)
-        ListeningHero(onOpenLibrary = onOpenLibrary)
-
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            HomeSectionHeading(
-                title = stringResource(R.string.recently_played),
-                icon = Icons.Filled.History
-            )
-            if (recentTracks.isEmpty()) {
-                FeatureEmptyState(
-                    icon = Icons.Filled.GraphicEq,
-                    title = stringResource(R.string.no_recent_title),
-                    description = stringResource(R.string.no_recent_music)
-                )
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    recentTracks.forEach { track ->
-                        HomeTrackItem(
-                            track = track,
-                            onClick = { onPlayTrack(recentTracks, track) }
-                        )
-                    }
-                }
-            }
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            HomeSectionHeading(
-                title = stringResource(R.string.favorites),
-                icon = Icons.Filled.FavoriteBorder
-            )
-            if (favoriteTracks.isEmpty()) {
-                FeatureEmptyState(
-                    icon = Icons.Filled.FavoriteBorder,
-                    title = stringResource(R.string.no_favorites_title),
-                    description = stringResource(R.string.no_favorites)
-                )
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    favoriteTracks.forEach { track ->
-                        HomeTrackItem(
-                            track = track,
-                            onClick = { onPlayTrack(favoriteTracks, track) }
-                        )
-                    }
-                }
-            }
-        }
-
-        LibraryShortcuts(onOpenLibrary = onOpenLibrary)
-        Spacer(modifier = Modifier.height(4.dp))
-    }
-}
-
-@Composable
-private fun HomeTrackItem(track: MusicTrackEntity, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, SubtleBorder)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 680.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.13f)) {
-                Icon(Icons.Filled.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(8.dp))
+            item(contentType = "header") {
+                HomeTopBar(
+                    showSearchAction = allTracks.isNotEmpty(),
+                    onOpenSearch = onOpenSearch,
+                    onOpenInsights = onOpenInsights,
+                    onOpenSettings = onOpenSettings
+                )
             }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(track.displayTitle, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(track.displayArtist.ifBlank { stringResource(R.string.unknown_artist) }, style = MaterialTheme.typography.bodySmall, color = SecondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+            if (allTracks.isEmpty()) {
+                item {
+                    EmptyHomePrompt(
+                        onScanMusic = onScanMusic,
+                        onOpenLibrary = onOpenLibrary,
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+                }
+            } else {
+                item {
+                    QuickActionChipsBar(
+                        totalTracksCount = totalTracksCount,
+                        favoritesCount = favoritesCount,
+                        playlistsCount = playlistsCount,
+                        onShufflePlay = onShufflePlay,
+                        onOpenLibrary = onOpenLibrary,
+                        onOpenFavorites = onOpenFavorites,
+                        onOpenPlaylists = onOpenPlaylists
+                    )
+                }
+
+                if (recentTracks.isNotEmpty()) {
+                    item {
+                        HomeSectionHeader(
+                            title = stringResource(R.string.recently_played),
+                            actionLabel = null,
+                            onAction = null
+                        )
+                    }
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(recentTracks, key = { "recent_${it.trackKey}" }) { track ->
+                                RecentCoverCard(
+                                    track = track,
+                                    isCurrentTrack = track.trackKey == activeTrackKey,
+                                    onClick = { onPlayTrack(recentTracks, track) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (favoriteTracks.isNotEmpty()) {
+                    item {
+                        HomeSectionHeader(
+                            title = stringResource(R.string.favorites),
+                            actionLabel = stringResource(R.string.see_all),
+                            onAction = onOpenFavorites
+                        )
+                    }
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(favoriteTracks, key = { "fav_${it.trackKey}" }) { track ->
+                                FavoriteShelfTile(
+                                    track = track,
+                                    isCurrentTrack = track.trackKey == activeTrackKey,
+                                    onClick = { onPlayTrack(favoriteTracks, track) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    HomeSectionHeader(
+                        title = stringResource(R.string.songs),
+                        actionLabel = stringResource(R.string.see_all),
+                        onAction = onOpenLibrary
+                    )
+                }
+
+                itemsIndexed(
+                    items = homePreviewTracks,
+                    key = { _, it -> "home_${it.trackKey}" },
+                    contentType = { _, _ -> "track_row" }
+                ) { index, track ->
+                    Box(modifier = Modifier.padding(horizontal = 20.dp)) {
+                        EditorialTrackRow(
+                            track = track,
+                            isCurrentTrack = track.trackKey == activeTrackKey,
+                            isFavorite = track.trackKey in favoriteKeys,
+                            onClick = { onPlayTrack(allTracks, track) },
+                            onToggleFavorite = { onToggleFavorite(track.trackKey) },
+                            showDivider = index < homePreviewTracks.lastIndex
+                        )
+                    }
+                }
+
+                if (allTracks.size > HOME_PREVIEW_SONG_LIMIT) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            OutlinedButton(
+                                onClick = onOpenLibrary,
+                                shape = RoundedCornerShape(50),
+                                border = BorderStroke(1.dp, SubtleBorder)
+                            ) {
+                                Text(
+                                    text = "${stringResource(R.string.see_all)} (${allTracks.size})",
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                        }
+                    }
+                }
             }
-            Icon(Icons.Filled.PlayArrow, contentDescription = stringResource(R.string.play), tint = MaterialTheme.colorScheme.primary)
         }
     }
 }
 
 @Composable
-private fun HomeHeader(onOpenSettings: () -> Unit) {
+private fun HomeTopBar(
+    showSearchAction: Boolean,
+    onOpenSearch: () -> Unit,
+    onOpenInsights: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Filled.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                Text(
-                    text = stringResource(R.string.app_brand_name),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = stringResource(R.string.premium_audio),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = SecondaryText,
-                    letterSpacing = 1.1.sp
-                )
-            }
-        }
-        IconButton(onClick = onOpenSettings) {
-            Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = stringResource(R.string.settings),
-                tint = SecondaryText
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = stringResource(R.string.app_brand_name),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.secondary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
+            Text(
+                text = stringResource(R.string.welcome_back),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (showSearchAction) {
+                IconButton(
+                    onClick = onOpenSearch,
+                    modifier = Modifier.testTag("home_search_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Search,
+                        contentDescription = stringResource(R.string.search_music),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+            IconButton(
+                onClick = onOpenInsights,
+                modifier = Modifier.testTag("home_insights_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.BarChart,
+                    contentDescription = stringResource(R.string.statistics),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier.testTag("home_settings_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = stringResource(R.string.settings),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ListeningHero(onOpenLibrary: () -> Unit) {
-    Surface(
-        onClick = onOpenLibrary,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        color = ElevatedBlack,
-        border = BorderStroke(1.dp, SubtleBorder)
+private fun QuickActionChipsBar(
+    totalTracksCount: Int,
+    favoritesCount: Int,
+    playlistsCount: Int,
+    onShufflePlay: () -> Unit,
+    onOpenLibrary: () -> Unit,
+    onOpenFavorites: () -> Unit,
+    onOpenPlaylists: () -> Unit
+) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.surfaceVariant,
-                            MaterialTheme.colorScheme.surface,
-                            MaterialTheme.colorScheme.background
-                        )
-                    )
-                )
-                .padding(21.dp)
-        ) {
-            VinylArtwork(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .size(148.dp)
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth(0.66f)
-                    .align(Alignment.CenterStart),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+        item {
+            Surface(
+                onClick = onShufflePlay,
+                modifier = Modifier.testTag("home_shuffle_button"),
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.primary
             ) {
-                Text(
-                    text = stringResource(R.string.your_sound),
-                    color = MaterialTheme.colorScheme.secondary,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.2.sp
-                )
-                Text(
-                    text = stringResource(R.string.listening_starts_here),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    lineHeight = 29.sp
-                )
-                Text(
-                    text = stringResource(R.string.browse_collection_hint),
-                    color = SecondaryText,
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Shuffle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.shuffle_play),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun VinylArtwork(modifier: Modifier = Modifier) {
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.20f), MaterialTheme.colorScheme.primary.copy(alpha = 0.02f), ElevatedBlack)
-                    )
-                )
-        )
-        Box(
-            modifier = Modifier
-                .size(132.dp)
-                .clip(CircleShape)
-                .background(Brush.sweepGradient(listOf(ElevatedBlack, MaterialTheme.colorScheme.background, ElevatedBlack)))
-                .border(1.dp, SubtleBorder, CircleShape)
-        )
-        Box(
-            modifier = Modifier
-                .size(92.dp)
-                .clip(CircleShape)
-                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f), CircleShape)
-        )
-        Box(
-            modifier = Modifier
-                .size(53.dp)
-                .clip(CircleShape)
-                .background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(MaterialTheme.colorScheme.background))
-        }
-    }
-}
-
-@Composable
-private fun HomeSectionHeading(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-private fun LibraryShortcuts(onOpenLibrary: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            text = stringResource(R.string.explore_library),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ShortcutTile(
-                modifier = Modifier.weight(1f),
+        item {
+            HomeFilterChip(
                 icon = Icons.Filled.LibraryMusic,
-                label = stringResource(R.string.songs),
-                onClick = onOpenLibrary
+                label = stringResource(R.string.track_count_short, totalTracksCount),
+                onClick = onOpenLibrary,
+                modifier = Modifier.testTag("home_hub_songs")
             )
-            ShortcutTile(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Filled.Album,
-                label = stringResource(R.string.albums),
-                onClick = onOpenLibrary
+        }
+        item {
+            HomeFilterChip(
+                icon = Icons.Filled.Favorite,
+                label = "${stringResource(R.string.favorites)} · $favoritesCount",
+                onClick = onOpenFavorites,
+                modifier = Modifier.testTag("home_hub_favorites")
             )
-            ShortcutTile(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Filled.Person,
-                label = stringResource(R.string.artists),
-                onClick = onOpenLibrary
+        }
+        item {
+            HomeFilterChip(
+                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                label = stringResource(R.string.playlist_count_short, playlistsCount),
+                onClick = onOpenPlaylists,
+                modifier = Modifier.testTag("home_hub_playlists")
             )
         }
     }
 }
 
 @Composable
-private fun ShortcutTile(
-    modifier: Modifier = Modifier,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+private fun HomeFilterChip(
+    icon: ImageVector,
     label: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Surface(
         onClick = onClick,
         modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, SubtleBorder)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.size(15.dp)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeSectionHeader(
+    title: String,
+    actionLabel: String?,
+    onAction: (() -> Unit)?
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        if (actionLabel != null && onAction != null) {
+            TextButton(onClick = onAction) {
+                Text(
+                    text = actionLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentCoverCard(
+    track: MusicTrackEntity,
+    isCurrentTrack: Boolean,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(136.dp)
+            .clickable(onClick = onClick),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(modifier = Modifier.size(136.dp)) {
+            TrackArtworkBox(
+                artworkPath = track.artworkFilePath,
+                size = 136.dp,
+                cornerRadius = 14.dp,
+                isCurrentTrack = isCurrentTrack
+            )
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.background.copy(alpha = 0.78f),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+                    .size(32.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = stringResource(R.string.play),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = track.displayTitle,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isCurrentTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = track.displayArtist.ifBlank { stringResource(R.string.unknown_artist) },
+                style = MaterialTheme.typography.bodySmall,
+                color = SecondaryText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun FavoriteShelfTile(
+    track: MusicTrackEntity,
+    isCurrentTrack: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, SubtleBorder),
+        modifier = Modifier.width(214.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            TrackArtworkBox(
+                artworkPath = track.artworkFilePath,
+                size = 44.dp,
+                cornerRadius = 10.dp,
+                isCurrentTrack = isCurrentTrack
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = track.displayTitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isCurrentTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = track.displayArtist.ifBlank { stringResource(R.string.unknown_artist) },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SecondaryText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyHomePrompt(
+    onScanMusic: () -> Unit,
+    onOpenLibrary: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, SubtleBorder)
     ) {
         Column(
-            modifier = Modifier.padding(vertical = 15.dp, horizontal = 8.dp),
+            modifier = Modifier.padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(22.dp))
-            Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.LibraryMusic,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+            Text(
+                text = stringResource(R.string.library_empty_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = stringResource(R.string.ready_to_scan),
+                style = MaterialTheme.typography.bodyMedium,
+                color = SecondaryText
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onScanMusic,
+                    modifier = Modifier.testTag("home_scan_button"),
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text(stringResource(R.string.scan_music))
+                }
+                OutlinedButton(
+                    onClick = onOpenLibrary,
+                    modifier = Modifier.testTag("home_open_library_button"),
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(1.dp, SubtleBorder)
+                ) {
+                    Text(stringResource(R.string.library))
+                }
+            }
         }
     }
 }

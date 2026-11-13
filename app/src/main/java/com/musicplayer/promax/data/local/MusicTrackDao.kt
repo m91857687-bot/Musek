@@ -77,18 +77,18 @@ interface MusicTrackDao {
 
     @Query("""
         SELECT t.* FROM music_tracks t
-        WHERE (:query = '' OR COALESCE(t.titleOverride, t.title) LIKE '%' || :query || '%' COLLATE NOCASE
-            OR COALESCE(t.artistOverride, t.artist) LIKE '%' || :query || '%' COLLATE NOCASE
-            OR COALESCE(t.albumOverride, t.album) LIKE '%' || :query || '%' COLLATE NOCASE)
+        WHERE (:query = '' OR COALESCE(NULLIF(t.titleOverride, ''), t.title) LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(NULLIF(t.artistOverride, ''), t.artist) LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(NULLIF(t.albumOverride, ''), t.album) LIKE '%' || :query || '%' COLLATE NOCASE)
           AND (:favoritesOnly = 0 OR EXISTS (
               SELECT 1 FROM favorite_tracks f WHERE f.trackKey = t.trackKey
           ))
         ORDER BY
-            CASE WHEN :sortMode = 'ARTIST' THEN COALESCE(t.artistOverride, t.artist) END COLLATE NOCASE ASC,
-            CASE WHEN :sortMode = 'ALBUM' THEN COALESCE(t.albumOverride, t.album) END COLLATE NOCASE ASC,
+            CASE WHEN :sortMode = 'ARTIST' THEN COALESCE(NULLIF(t.artistOverride, ''), t.artist) END COLLATE NOCASE ASC,
+            CASE WHEN :sortMode = 'ALBUM' THEN COALESCE(NULLIF(t.albumOverride, ''), t.album) END COLLATE NOCASE ASC,
             CASE WHEN :sortMode = 'DURATION' THEN t.durationMs END ASC,
             CASE WHEN :sortMode = 'NEWEST' THEN t.dateModifiedSeconds END DESC,
-            COALESCE(t.titleOverride, t.title) COLLATE NOCASE ASC
+            COALESCE(NULLIF(t.titleOverride, ''), t.title) COLLATE NOCASE ASC
     """)
     fun observeLibraryTracks(query: String, sortMode: String, favoritesOnly: Boolean): Flow<List<MusicTrackEntity>>
 

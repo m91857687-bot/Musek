@@ -24,6 +24,17 @@ android {
         buildConfig = true
     }
 
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -68,7 +79,7 @@ dependencies {
     implementation(libs.compose.animation)
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
-    implementation(libs.compose.ui.tooling.preview)
+    // implementation(libs.compose.ui.tooling.preview) // Unused in production source
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.extended)
 

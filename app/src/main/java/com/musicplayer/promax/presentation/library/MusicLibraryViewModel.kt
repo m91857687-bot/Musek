@@ -37,21 +37,31 @@ class MusicLibraryViewModel(context: Context) : ViewModel() {
     private val sortMode = MutableStateFlow(SORT_TITLE)
     private val favoritesOnly = MutableStateFlow(false)
 
+    private val filterParams = combine(searchQuery, sortMode, favoritesOnly) { query, sort, onlyFavorites ->
+        Triple(query, sort, onlyFavorites)
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
-    private val filteredTracks = combine(searchQuery.debounce(250), sortMode, favoritesOnly) { query, sort, onlyFavorites ->
+    private val filteredTracks = combine(
+        searchQuery.debounce { if (it.isEmpty()) 0L else 150L },
+        sortMode,
+        favoritesOnly
+    ) { query, sort, onlyFavorites ->
         Triple(query, sort, onlyFavorites)
     }.flatMapLatest { (query, sort, onlyFavorites) ->
         trackDao.observeLibraryTracks(query.trim(), sort, onlyFavorites)
     }
 
     private val homeHighlights = combine(
+        trackDao.observeLibraryTracks("", SORT_NEWEST, false),
         statsDao.observeRecentTracks(),
         playlistDao.observeFavoriteTracks()
-    ) { recent, favorites -> recent to favorites }
+    ) { allNewest, recent, favorites -> Triple(allNewest, recent, favorites) }
 
     val uiState = combine(
         trackDao.observeTrackCount(),
         filteredTracks,
+        filterParams,
         workManager.getWorkInfosForUniqueWorkLiveData(MusicIndexWorker.UNIQUE_WORK_NAME).asFlow(),
         playlistDao.observePlaylists(),
         playlistDao.observeFavoriteKeys(),
@@ -61,27 +71,30 @@ class MusicLibraryViewModel(context: Context) : ViewModel() {
         @Suppress("UNCHECKED_CAST")
         val tracks = values[1] as List<MusicTrackEntity>
         @Suppress("UNCHECKED_CAST")
-        val workInfos = values[2] as List<WorkInfo>
+        val filters = values[2] as Triple<String, String, Boolean>
         @Suppress("UNCHECKED_CAST")
-        val playlists = values[3] as List<PlaylistWithCount>
+        val workInfos = values[3] as List<WorkInfo>
         @Suppress("UNCHECKED_CAST")
-        val favoriteKeys = values[4] as List<String>
+        val playlists = values[4] as List<PlaylistWithCount>
         @Suppress("UNCHECKED_CAST")
-        val highlights = values[5] as Pair<List<MusicTrackEntity>, List<MusicTrackEntity>>
+        val favoriteKeys = values[5] as List<String>
+        @Suppress("UNCHECKED_CAST")
+        val highlights = values[6] as Triple<List<MusicTrackEntity>, List<MusicTrackEntity>, List<MusicTrackEntity>>
         val active = workInfos.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
         val failed = workInfos.lastOrNull()?.state == WorkInfo.State.FAILED
         LibraryUiState(
             trackCount = count,
             tracks = tracks,
+            homeTracks = highlights.first,
             isScanning = active,
             scanFailed = failed,
-            searchQuery = searchQuery.value,
-            sortMode = sortMode.value,
-            favoritesOnly = favoritesOnly.value,
+            searchQuery = filters.first,
+            sortMode = filters.second,
+            favoritesOnly = filters.third,
             favoriteKeys = favoriteKeys.toSet(),
             playlists = playlists,
-            recentTracks = highlights.first,
-            favoriteTracks = highlights.second
+            recentTracks = highlights.second,
+            favoriteTracks = highlights.third
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
@@ -162,6 +175,7 @@ class MusicLibraryViewModel(context: Context) : ViewModel() {
 data class LibraryUiState(
     val trackCount: Int = 0,
     val tracks: List<MusicTrackEntity> = emptyList(),
+    val homeTracks: List<MusicTrackEntity> = emptyList(),
     val isScanning: Boolean = false,
     val scanFailed: Boolean = false,
     val searchQuery: String = "",

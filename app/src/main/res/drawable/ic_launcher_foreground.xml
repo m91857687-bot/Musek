@@ -1,9 +1,8 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path
-        android:fillColor="#168BFF"
-        android:pathData="M44,24 L44,68.5 C40.8,66.8 36.8,66.3 32.8,67.4 C25.8,69.3 21,75.1 22.1,80.4 C23.2,85.7 30,88.3 37,86.4 C43.3,84.7 47.8,79.8 47.8,75.1 L47.8,42.2 L76,34.8 L76,61.5 C72.8,59.8 68.8,59.3 64.8,60.4 C57.8,62.3 53,68.1 54.1,73.4 C55.2,78.7 62,81.3 69,79.4 C75.3,77.7 79.8,72.8 79.8,68.1 L79.8,20 Z" />
-</vector>
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:width="66dp"
+        android:height="66dp"
+        android:drawable="@drawable/music_app_icon_1794586255931"
+        android:gravity="center" />
+</layer-list>

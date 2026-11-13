@@ -164,4 +164,10 @@
     <string name="widget_open_hint">اضغط لفتح مشغل الموسيقى</string>
     <string name="accessibility_play_pause">تشغيل أو إيقاف مؤقت</string>
     <string name="accessibility_next_track">الأغنية التالية</string>
+    <string name="shuffle_play">تشغيل عشوائي</string>
+    <string name="track_count_short">%1$d أغنية</string>
+    <string name="playlist_count_short">%1$d قائمة</string>
+    <string name="see_all">عرض الكل</string>
+    <string name="ready_to_scan">افحص جهازك لبدء الاستماع.</string>
+    <string name="more_options">المزيد من الخيارات</string>
 </resources>
