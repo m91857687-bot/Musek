@@ -28,18 +28,31 @@ object PlaybackController {
         controller.play()
     }
 
+    fun refreshTrackMetadata(controller: Player, track: MusicTrackEntity) {
+        val count = controller.mediaItemCount
+        for (index in 0 until count) {
+            val item = controller.getMediaItemAt(index)
+            if (item.mediaId == track.trackKey) {
+                val updated = item.buildUpon()
+                    .setMediaMetadata(buildMetadata(track))
+                    .build()
+                controller.replaceMediaItem(index, updated)
+            }
+        }
+    }
+
     private fun toMediaItem(track: MusicTrackEntity): MediaItem = MediaItem.Builder()
         .setMediaId(track.trackKey)
         .setUri(Uri.parse(track.contentUri))
-        .setMediaMetadata(
-            MediaMetadata.Builder()
-                .setTitle(track.displayTitle)
-                .setArtist(track.displayArtist)
-                .setAlbumTitle(track.displayAlbum)
-                .apply {
-                    track.artworkFilePath?.takeIf { File(it).isFile }?.let { setArtworkUri(Uri.fromFile(File(it))) }
-                }
-                .build()
-        )
+        .setMediaMetadata(buildMetadata(track))
+        .build()
+
+    private fun buildMetadata(track: MusicTrackEntity): MediaMetadata = MediaMetadata.Builder()
+        .setTitle(track.displayTitle)
+        .setArtist(track.displayArtist)
+        .setAlbumTitle(track.displayAlbum)
+        .apply {
+            track.artworkFilePath?.takeIf { File(it).isFile }?.let { setArtworkUri(Uri.fromFile(File(it))) }
+        }
         .build()
 }

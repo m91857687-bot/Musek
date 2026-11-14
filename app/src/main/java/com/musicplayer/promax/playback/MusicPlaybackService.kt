@@ -4,20 +4,23 @@ import android.app.PendingIntent
 import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.musicplayer.promax.MainActivity
 import com.musicplayer.promax.data.local.MusicLibraryDatabase
-import com.musicplayer.promax.widget.MusicPlayerWidgetProvider
 import com.musicplayer.promax.data.preferences.DataStoreUserPreferencesRepository
+import com.musicplayer.promax.widget.MusicPlayerWidgetProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Owns the player independently of the Activity so audio can continue in the background. */
@@ -27,21 +30,47 @@ class MusicPlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private var historyRecorder: PlaybackHistoryRecorder? = null
     private var currentAudioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
+    private var crossfadeJob: Job? = null
+    @Volatile private var configuredCrossfadeMs: Long = 2_000L
+    @Volatile private var fadeInStartedAtMs: Long = 0L
+    private lateinit var preferences: DataStoreUserPreferencesRepository
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
     private val audioSessionListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_READY) attachAudioEffectsIfNeeded()
             refreshWidget()
         }
+
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
             attachAudioEffectsIfNeeded(audioSessionId)
         }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            if (configuredCrossfadeMs > 0L) {
+                fadeInStartedAtMs = System.currentTimeMillis()
+                player?.volume = 0.08f
+            } else {
+                player?.volume = 1.0f
+            }
+            refreshWidget()
+        }
+
         override fun onEvents(player: Player, events: Player.Events) = refreshWidget()
-        override fun onIsPlayingChanged(isPlaying: Boolean) = refreshWidget()
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying && configuredCrossfadeMs > 0L) {
+                startCrossfadeMonitor()
+            } else if (!isPlaying) {
+                player?.volume = 1.0f
+            }
+            refreshWidget()
+        }
     }
 
     override fun onCreate() {
         super.onCreate()
+        preferences = DataStoreUserPreferencesRepository(applicationContext)
         val activePlayer = ExoPlayer.Builder(this).build().apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
@@ -54,7 +83,22 @@ class MusicPlaybackService : MediaSessionService() {
             repeatMode = Player.REPEAT_MODE_OFF
         }
         player = activePlayer
-        val preferences = DataStoreUserPreferencesRepository(applicationContext)
+
+        serviceScope.launch {
+            preferences.playbackSpeed.collectLatest { speed ->
+                activePlayer.setPlaybackSpeed(speed)
+            }
+        }
+        serviceScope.launch {
+            preferences.crossfadeSeconds.collectLatest { seconds ->
+                configuredCrossfadeMs = (seconds.coerceIn(0, 10) * 1000L)
+                if (configuredCrossfadeMs <= 0L) {
+                    activePlayer.volume = 1.0f
+                } else if (activePlayer.isPlaying) {
+                    startCrossfadeMonitor()
+                }
+            }
+        }
         serviceScope.launch {
             preferences.sleepTimerEndMillis.collectLatest { endMillis ->
                 if (endMillis != null) {
@@ -93,6 +137,41 @@ class MusicPlaybackService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
+    private fun startCrossfadeMonitor() {
+        if (crossfadeJob?.isActive == true) return
+        crossfadeJob = serviceScope.launch {
+            while (true) {
+                val activePlayer = player ?: break
+                val crossfadeMs = configuredCrossfadeMs
+                if (!activePlayer.isPlaying || crossfadeMs <= 0L) {
+                    activePlayer.volume = 1.0f
+                    break
+                }
+                val now = System.currentTimeMillis()
+                val fadeInDuration = minOf(crossfadeMs, 2_500L)
+                val fadeInElapsed = (now - fadeInStartedAtMs).coerceAtLeast(0L)
+                val fadeInFactor = if (fadeInStartedAtMs > 0L && fadeInElapsed < fadeInDuration) {
+                    (0.08f + 0.92f * (fadeInElapsed.toFloat() / fadeInDuration.toFloat())).coerceIn(0.08f, 1.0f)
+                } else {
+                    1.0f
+                }
+
+                val duration = activePlayer.duration
+                val position = activePlayer.currentPosition
+                val fadeOutFactor = if (duration != C.TIME_UNSET && duration > crossfadeMs * 2 && position >= 0L) {
+                    val remaining = duration - position
+                    if (remaining in 1L..crossfadeMs) {
+                        (0.10f + 0.90f * (remaining.toFloat() / crossfadeMs.toFloat())).coerceIn(0.10f, 1.0f)
+                    } else 1.0f
+                } else 1.0f
+
+                activePlayer.volume = minOf(fadeInFactor, fadeOutFactor)
+                delay(60L)
+            }
+            crossfadeJob = null
+        }
+    }
+
     private fun refreshWidget() {
         val activePlayer = player ?: return
         val metadata = activePlayer.currentMediaItem?.mediaMetadata
@@ -114,11 +193,30 @@ class MusicPlaybackService : MediaSessionService() {
             previous.release()
         }
         currentAudioSessionId = sessionId
-        audioEffectsManager = runCatching { AudioEffectsManager(sessionId) }.getOrNull()
-        audioEffectsManager?.let(AudioEffectsBridge::attach)
+        val created = runCatching { AudioEffectsManager(sessionId) }.getOrNull()
+        audioEffectsManager = created
+        if (created != null) {
+            serviceScope.launch {
+                val enabled = preferences.audioEffectsEnabled.first()
+                val presetName = preferences.eqPresetName.first()
+                val bass = preferences.bassBoostStrength.first()
+                val virtualizer = preferences.virtualizerStrength.first()
+                val loudness = preferences.loudnessGainMb.first()
+                presetName?.let { name ->
+                    runCatching { AudioEffectsManager.Preset.valueOf(name) }.getOrNull()?.let(created::applyPreset)
+                }
+                created.setBassStrength(bass)
+                created.setVirtualizerStrength(virtualizer)
+                created.setLoudnessGain(loudness)
+                created.setEnabled(enabled)
+                AudioEffectsBridge.attach(created)
+            }
+        }
     }
 
     override fun onDestroy() {
+        crossfadeJob?.cancel()
+        crossfadeJob = null
         serviceScope.cancel()
         audioEffectsManager?.let { effects ->
             AudioEffectsBridge.detach(effects)

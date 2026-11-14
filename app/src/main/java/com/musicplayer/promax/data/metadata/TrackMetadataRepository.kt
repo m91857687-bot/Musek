@@ -112,6 +112,61 @@ class TrackMetadataRepository(context: Context) {
         }
     }
 
+    suspend fun updateCustomArtwork(trackKey: String, imageUri: Uri): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            appContext.contentResolver.openInputStream(imageUri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, bounds)
+            } ?: error("Unable to open image")
+            require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outWidth <= 12_000 && bounds.outHeight <= 12_000) {
+                "Invalid image dimensions"
+            }
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = ArtworkSampling.calculateSampleSize(bounds.outWidth, bounds.outHeight, MAX_ARTWORK_DIMENSION)
+                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+            }
+            val bitmap = appContext.contentResolver.openInputStream(imageUri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, decodeOptions)
+            } ?: error("Could not decode image")
+
+            val previousPath = trackDao.getTrack(trackKey)?.artworkFilePath
+            val safeName = "custom_${sha256(trackKey)}_${System.currentTimeMillis()}"
+            val target = File(artworkDirectory, "$safeName.jpg")
+            val temporary = File(artworkDirectory, "$safeName.tmp")
+            val compressed = try {
+                temporary.outputStream().use { output ->
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, output)
+                }
+            } finally {
+                bitmap.recycle()
+            }
+            require(compressed) { "Could not save cover image" }
+            if (target.exists()) target.delete()
+            if (!temporary.renameTo(target)) {
+                temporary.copyTo(target, overwrite = true)
+                temporary.delete()
+            }
+            trackDao.updateArtworkPath(trackKey, target.absolutePath)
+            cleanupOldArtwork(previousPath, target.absolutePath)
+            target.absolutePath
+        }
+    }
+
+    suspend fun resetArtwork(trackKey: String): String? = withContext(Dispatchers.IO) {
+        val track = trackDao.getTrack(trackKey) ?: return@withContext null
+        cleanupOldArtwork(track.artworkFilePath, null)
+        trackDao.updateArtworkPath(trackKey, null)
+        extractArtwork(track.copy(artworkFilePath = null))
+    }
+
+    private fun cleanupOldArtwork(oldPath: String?, keepPath: String?) {
+        if (oldPath.isNullOrBlank() || oldPath == keepPath) return
+        val oldFile = File(oldPath)
+        if (oldFile.parentFile?.absolutePath == artworkDirectory.absolutePath && oldFile.isFile) {
+            runCatching { oldFile.delete() }
+        }
+    }
+
     suspend fun updateDisplayMetadata(trackKey: String, title: String, artist: String, album: String) =
         withContext(Dispatchers.IO) {
             trackDao.updateDisplayMetadata(

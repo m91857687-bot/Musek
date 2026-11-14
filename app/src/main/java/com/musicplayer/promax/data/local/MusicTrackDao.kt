@@ -75,6 +75,12 @@ interface MusicTrackDao {
     @Query("SELECT * FROM music_tracks WHERE artworkFilePath IS NULL LIMIT :limit")
     suspend fun tracksMissingArtwork(limit: Int = 500): List<MusicTrackEntity>
 
+    @Query("SELECT * FROM music_tracks ORDER BY dateModifiedSeconds DESC LIMIT :limit")
+    fun observeRecentlyAddedTracks(limit: Int = 25): Flow<List<MusicTrackEntity>>
+
+    @Query("SELECT * FROM music_tracks WHERE durationMs >= :minDurationMs ORDER BY durationMs DESC LIMIT :limit")
+    fun observeLongTracks(minDurationMs: Long = 240_000L, limit: Int = 25): Flow<List<MusicTrackEntity>>
+
     @Query("SELECT COUNT(*) FROM music_tracks")
     fun observeTrackCount(): Flow<Int>
 

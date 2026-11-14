@@ -2,6 +2,7 @@ package com.musicplayer.promax.playback
 
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
+import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.Virtualizer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,18 +15,21 @@ class AudioEffectsManager(audioSessionId: Int) {
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
     private var virtualizer: Virtualizer? = null
+    private var loudnessEnhancer: LoudnessEnhancer? = null
     @Volatile var effectsEnabled: Boolean = true
         private set
 
     val isEqualizerAvailable: Boolean get() = equalizer != null
     val isBassBoostAvailable: Boolean get() = bassBoost != null
     val isVirtualizerAvailable: Boolean get() = virtualizer != null
+    val isLoudnessAvailable: Boolean get() = loudnessEnhancer != null
 
     init {
         if (audioSessionId > 0) {
             equalizer = runCatching { Equalizer(0, audioSessionId).apply { enabled = true } }.getOrNull()
             bassBoost = runCatching { BassBoost(0, audioSessionId).apply { enabled = true } }.getOrNull()
             virtualizer = runCatching { Virtualizer(0, audioSessionId).apply { enabled = true } }.getOrNull()
+            loudnessEnhancer = runCatching { LoudnessEnhancer(audioSessionId).apply { enabled = true } }.getOrNull()
         }
     }
 
@@ -60,11 +64,18 @@ class AudioEffectsManager(audioSessionId: Int) {
 
     fun virtualizerStrength(): Int = runCatching { virtualizer?.roundedStrength?.toInt() ?: 0 }.getOrDefault(0)
 
+    fun setLoudnessGain(gainMb: Int) {
+        runCatching { loudnessEnhancer?.setTargetGain(gainMb.coerceIn(0, 1500)) }
+    }
+
+    fun loudnessGain(): Int = runCatching { loudnessEnhancer?.targetGain?.toInt() ?: 0 }.getOrDefault(0)
+
     fun setEnabled(enabled: Boolean) {
         effectsEnabled = enabled
         runCatching { equalizer?.enabled = enabled }
         runCatching { bassBoost?.enabled = enabled }
         runCatching { virtualizer?.enabled = enabled }
+        runCatching { loudnessEnhancer?.enabled = enabled }
     }
 
     fun applyPreset(preset: Preset) {
@@ -77,6 +88,10 @@ class AudioEffectsManager(audioSessionId: Int) {
                 Preset.BASS -> listOf(650, 500, 150, 0, -100)
                 Preset.VOCAL -> listOf(-150, 100, 450, 350, 100)
                 Preset.TREBLE -> listOf(-100, 0, 150, 450, 650)
+                Preset.POP -> listOf(-100, 250, 450, 250, -50)
+                Preset.ROCK -> listOf(450, 200, -100, 300, 550)
+                Preset.JAZZ -> listOf(350, 150, -150, 250, 400)
+                Preset.DANCE -> listOf(550, 350, 0, 300, 450)
             }
             val range = eq.bandLevelRange
             for (i in 0 until count) {
@@ -92,12 +107,14 @@ class AudioEffectsManager(audioSessionId: Int) {
         runCatching { equalizer?.release() }
         runCatching { bassBoost?.release() }
         runCatching { virtualizer?.release() }
+        runCatching { loudnessEnhancer?.release() }
         equalizer = null
         bassBoost = null
         virtualizer = null
+        loudnessEnhancer = null
     }
 
-    enum class Preset { FLAT, BASS, VOCAL, TREBLE }
+    enum class Preset { FLAT, BASS, VOCAL, TREBLE, POP, ROCK, JAZZ, DANCE }
 }
 
 /** Same-process bridge: the playback service owns the effects and the UI only controls them. */

@@ -58,9 +58,12 @@ class MusicLibraryViewModel(context: Context) : ViewModel() {
 
     private val homeHighlights = combine(
         trackDao.observeLibraryTracks("", SORT_NEWEST, false),
-        statsDao.observeRecentTracks(),
-        playlistDao.observeFavoriteTracks()
-    ) { allNewest, recent, favorites -> Triple(allNewest, recent, favorites) }
+        statsDao.observeRecentTracks(limit = 30),
+        playlistDao.observeFavoriteTracks(limit = 100),
+        statsDao.observeMostPlayedTracks(limit = 30)
+    ) { allNewest, recent, favorites, mostPlayed ->
+        SmartCollections(allNewest, recent, favorites, mostPlayed)
+    }
 
     val uiState = combine(
         trackDao.observeTrackCount(),
@@ -82,14 +85,13 @@ class MusicLibraryViewModel(context: Context) : ViewModel() {
         val playlists = values[4] as List<PlaylistWithCount>
         @Suppress("UNCHECKED_CAST")
         val favoriteKeys = values[5] as List<String>
-        @Suppress("UNCHECKED_CAST")
-        val highlights = values[6] as Triple<List<MusicTrackEntity>, List<MusicTrackEntity>, List<MusicTrackEntity>>
+        val highlights = values[6] as SmartCollections
         val active = workInfos.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
         val failed = workInfos.lastOrNull()?.state == WorkInfo.State.FAILED
         LibraryUiState(
             trackCount = count,
             tracks = tracks,
-            homeTracks = highlights.first,
+            homeTracks = highlights.allNewest,
             isScanning = active,
             scanFailed = failed,
             searchQuery = filters.first,
@@ -97,8 +99,10 @@ class MusicLibraryViewModel(context: Context) : ViewModel() {
             favoritesOnly = filters.third,
             favoriteKeys = favoriteKeys.toSet(),
             playlists = playlists,
-            recentTracks = highlights.second,
-            favoriteTracks = highlights.third
+            recentTracks = highlights.recent.take(8),
+            smartRecentTracks = highlights.recent,
+            smartMostPlayedTracks = highlights.mostPlayed,
+            favoriteTracks = highlights.favorites
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
@@ -107,6 +111,14 @@ class MusicLibraryViewModel(context: Context) : ViewModel() {
 
     fun updateTrackMetadata(trackKey: String, title: String, artist: String, album: String) {
         viewModelScope.launch { metadataRepository.updateDisplayMetadata(trackKey, title, artist, album) }
+    }
+
+    fun updateTrackArtwork(trackKey: String, imageUri: Uri, onResult: (Result<String>) -> Unit = {}) {
+        viewModelScope.launch { onResult(metadataRepository.updateCustomArtwork(trackKey, imageUri)) }
+    }
+
+    fun resetTrackArtwork(trackKey: String) {
+        viewModelScope.launch { metadataRepository.resetArtwork(trackKey) }
     }
 
     fun importLyrics(trackKey: String, uri: Uri, onResult: (Result<Int>) -> Unit = {}) {
@@ -186,6 +198,13 @@ class MusicLibraryViewModel(context: Context) : ViewModel() {
     }
 }
 
+private data class SmartCollections(
+    val allNewest: List<MusicTrackEntity>,
+    val recent: List<MusicTrackEntity>,
+    val favorites: List<MusicTrackEntity>,
+    val mostPlayed: List<MusicTrackEntity>
+)
+
 data class LibraryUiState(
     val trackCount: Int = 0,
     val tracks: List<MusicTrackEntity> = emptyList(),
@@ -198,5 +217,7 @@ data class LibraryUiState(
     val favoriteKeys: Set<String> = emptySet(),
     val playlists: List<PlaylistWithCount> = emptyList(),
     val recentTracks: List<MusicTrackEntity> = emptyList(),
+    val smartRecentTracks: List<MusicTrackEntity> = emptyList(),
+    val smartMostPlayedTracks: List<MusicTrackEntity> = emptyList(),
     val favoriteTracks: List<MusicTrackEntity> = emptyList()
 )

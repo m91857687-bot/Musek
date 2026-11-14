@@ -238,4 +238,37 @@ class MusicLibraryDatabaseTest {
         playlistDao.removeTrack(chillId, "v:1", 12L)
         assertEquals(setOf(driveId), playlistDao.observePlaylistIdsForTrack("v:1").first().toSet())
     }
+
+    @Test
+    fun observeMostPlayedTracksOrdersByTotalPlayCount() = runTest {
+        val trackDao = db.musicTrackDao()
+        val statsDao = db.playbackStatsDao()
+        val now = System.currentTimeMillis()
+        trackDao.upsertTracks(
+            listOf(
+                MusicTrackEntity("v:1", 1L, "v", "content://1", "Song One", "A", "B", 100_000L, 1000L, 100L, "audio/mpeg", null),
+                MusicTrackEntity("v:2", 2L, "v", "content://2", "Song Two", "A", "B", 100_000L, 1000L, 100L, "audio/mpeg", null),
+                MusicTrackEntity("v:3", 3L, "v", "content://3", "Zero Plays", "A", "B", 100_000L, 1000L, 100L, "audio/mpeg", null)
+            )
+        )
+        statsDao.insertSegment(PlaybackHistoryEntity(trackKey = "v:1", playedAt = now - 5_000L, listenedMs = 20_000L, playCount = 1))
+        statsDao.insertSegment(PlaybackHistoryEntity(trackKey = "v:2", playedAt = now - 3_000L, listenedMs = 30_000L, playCount = 1))
+        statsDao.insertSegment(PlaybackHistoryEntity(trackKey = "v:2", playedAt = now - 1_000L, listenedMs = 30_000L, playCount = 1))
+
+        val mostPlayed = statsDao.observeMostPlayedTracks(limit = 10).first()
+        assertEquals(listOf("v:2", "v:1"), mostPlayed.map { it.trackKey })
+    }
+
+    @Test
+    fun updateArtworkPersistsAndClearsCustomPath() = runTest {
+        val trackDao = db.musicTrackDao()
+        trackDao.upsertTracks(
+            listOf(MusicTrackEntity("v:9", 9L, "v", "content://9", "Cover Song", "A", "B", 100_000L, 1000L, 100L, "audio/mpeg", null))
+        )
+        trackDao.updateArtworkPath("v:9", "/data/user/0/app/files/artwork/custom.jpg")
+        assertEquals("/data/user/0/app/files/artwork/custom.jpg", trackDao.getTrack("v:9")?.artworkFilePath)
+
+        trackDao.updateArtworkPath("v:9", null)
+        assertEquals(null, trackDao.getTrack("v:9")?.artworkFilePath)
+    }
 }

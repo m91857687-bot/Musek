@@ -70,7 +70,7 @@ interface PlaylistDao {
     fun observeFavoriteKeys(): Flow<List<String>>
 
     @Query("SELECT t.* FROM music_tracks t INNER JOIN favorite_tracks f ON t.trackKey = f.trackKey ORDER BY f.createdAt DESC LIMIT :limit")
-    fun observeFavoriteTracks(limit: Int = 5): Flow<List<MusicTrackEntity>>
+    fun observeFavoriteTracks(limit: Int = 25): Flow<List<MusicTrackEntity>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun addFavorite(favorite: FavoriteTrackEntity)

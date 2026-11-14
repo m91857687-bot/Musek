@@ -34,6 +34,10 @@ object ArtworkThumbnailCache {
         }
     }
 
+    fun evictAll() {
+        cache.evictAll()
+    }
+
     private fun decodeSampled(filePath: String, targetPx: Int): Bitmap? = runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(filePath, bounds)

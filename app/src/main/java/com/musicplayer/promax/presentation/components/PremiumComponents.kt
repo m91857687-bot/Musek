@@ -28,8 +28,10 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -52,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -232,122 +235,172 @@ fun EditorialTrackRow(
     track: MusicTrackEntity,
     isCurrentTrack: Boolean = false,
     isRepeatingTrack: Boolean = false,
+    isHighlighted: Boolean = false,
     isFavorite: Boolean? = null,
     onClick: () -> Unit,
     onToggleRepeatTrack: (() -> Unit)? = null,
     onToggleFavorite: (() -> Unit)? = null,
     onAddToPlaylist: (() -> Unit)? = null,
     onEditMetadata: (() -> Unit)? = null,
+    onChangeCover: (() -> Unit)? = null,
+    onResetCover: (() -> Unit)? = null,
     showDivider: Boolean = true
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val hasMenu = onEditMetadata != null || onChangeCover != null || (onResetCover != null && !track.artworkFilePath.isNullOrEmpty())
+    val hasQuickActions = onToggleRepeatTrack != null || onAddToPlaylist != null || (onToggleFavorite != null && isFavorite != null)
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            TrackArtworkBox(
-                artworkPath = track.artworkFilePath,
-                size = 50.dp,
-                cornerRadius = 11.dp,
-                isCurrentTrack = isCurrentTrack
-            )
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = if (isHighlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
+        border = if (isHighlighted) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)) else null
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onClick)
+                    .padding(horizontal = if (isHighlighted) 8.dp else 0.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    text = track.displayTitle,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (isCurrentTrack) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isCurrentTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                val subtitle = buildList {
-                    add(track.displayArtist.ifBlank { stringResource(R.string.unknown_artist) })
-                    if (track.displayAlbum.isNotBlank()) add(track.displayAlbum)
-                    if (track.durationMs > 0L) add(formatEditorialDuration(track.durationMs))
-                }.joinToString(" • ")
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SecondaryText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            if (onToggleRepeatTrack != null) {
-                IconButton(
-                    onClick = onToggleRepeatTrack,
-                    modifier = Modifier.testTag("track_repeat_${track.trackKey}")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isRepeatingTrack) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
-                        contentDescription = stringResource(R.string.repeat_this_song),
-                        tint = if (isRepeatingTrack) MaterialTheme.colorScheme.primary else SecondaryText
+                    TrackArtworkBox(
+                        artworkPath = track.artworkFilePath,
+                        size = 54.dp,
+                        cornerRadius = 12.dp,
+                        isCurrentTrack = isCurrentTrack
                     )
-                }
-            }
-            if (onAddToPlaylist != null) {
-                IconButton(
-                    onClick = onAddToPlaylist,
-                    modifier = Modifier.testTag("track_add_playlist_${track.trackKey}")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
-                        contentDescription = stringResource(R.string.add_to_playlist),
-                        tint = MaterialTheme.colorScheme.secondary
-                    )
-                }
-            }
-            if (onToggleFavorite != null && isFavorite != null) {
-                IconButton(onClick = onToggleFavorite) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        contentDescription = stringResource(R.string.favorites),
-                        tint = if (isFavorite) MaterialTheme.colorScheme.primary else SecondaryText
-                    )
-                }
-            }
-            if (onEditMetadata != null) {
-                Box {
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(
-                            imageVector = Icons.Filled.MoreVert,
-                            contentDescription = stringResource(R.string.more_options),
-                            tint = SecondaryText
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.edit_track_metadata)) },
-                            leadingIcon = {
-                                Icon(Icons.Filled.Edit, contentDescription = null)
-                            },
-                            onClick = {
-                                menuExpanded = false
-                                onEditMetadata()
-                            }
+                        Text(
+                            text = track.displayTitle,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = if (isCurrentTrack) FontWeight.Bold else FontWeight.SemiBold,
+                            color = if (isCurrentTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        val subtitle = buildList {
+                            add(track.displayArtist.ifBlank { stringResource(R.string.unknown_artist) })
+                            if (track.displayAlbum.isNotBlank()) add(track.displayAlbum)
+                            if (track.durationMs > 0L) add(formatEditorialDuration(track.durationMs))
+                        }.joinToString(" • ")
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SecondaryText,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (hasMenu) {
+                        Box {
+                            IconButton(
+                                onClick = { menuExpanded = true },
+                                modifier = Modifier.testTag("track_more_${track.trackKey}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.MoreVert,
+                                    contentDescription = stringResource(R.string.more_options),
+                                    tint = SecondaryText
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false }
+                            ) {
+                                if (onEditMetadata != null) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.edit_track_metadata)) },
+                                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onEditMetadata()
+                                        }
+                                    )
+                                }
+                                if (onChangeCover != null) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.change_cover_art)) },
+                                        leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onChangeCover()
+                                        }
+                                    )
+                                }
+                                if (onResetCover != null && !track.artworkFilePath.isNullOrEmpty()) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.reset_cover_art)) },
+                                        leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onResetCover()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if (hasQuickActions) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 60.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (onToggleRepeatTrack != null) {
+                            IconButton(
+                                onClick = onToggleRepeatTrack,
+                                modifier = Modifier.testTag("track_repeat_${track.trackKey}")
+                            ) {
+                                Icon(
+                                    imageVector = if (isRepeatingTrack) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
+                                    contentDescription = stringResource(R.string.repeat_this_song),
+                                    tint = if (isRepeatingTrack) MaterialTheme.colorScheme.primary else SecondaryText
+                                )
+                            }
+                        }
+                        if (onAddToPlaylist != null) {
+                            IconButton(
+                                onClick = onAddToPlaylist,
+                                modifier = Modifier.testTag("track_add_playlist_${track.trackKey}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
+                                    contentDescription = stringResource(R.string.add_to_playlist),
+                                    tint = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+                        if (onToggleFavorite != null && isFavorite != null) {
+                            IconButton(onClick = onToggleFavorite) {
+                                Icon(
+                                    imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                                    contentDescription = stringResource(R.string.favorites),
+                                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else SecondaryText
+                                )
+                            }
+                        }
                     }
                 }
             }
-        }
-        if (showDivider) {
-            HorizontalDivider(
-                modifier = Modifier.padding(start = 60.dp),
-                thickness = 0.5.dp,
-                color = SubtleBorder.copy(alpha = 0.5f)
-            )
+            if (showDivider) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 66.dp),
+                    thickness = 0.5.dp,
+                    color = SubtleBorder.copy(alpha = 0.5f)
+                )
+            }
         }
     }
 }

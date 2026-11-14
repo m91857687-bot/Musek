@@ -1,47 +1,89 @@
 package com.musicplayer.promax.presentation.player
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import java.io.File
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -50,21 +92,37 @@ import com.musicplayer.promax.data.local.MusicLibraryDatabase
 import com.musicplayer.promax.data.local.MusicTrackEntity
 import com.musicplayer.promax.data.metadata.LrcParser
 import com.musicplayer.promax.data.metadata.TrackMetadataRepository
-import com.musicplayer.promax.ui.theme.*
+import com.musicplayer.promax.ui.theme.MidnightBlack
+import com.musicplayer.promax.ui.theme.SecondaryText
+import com.musicplayer.promax.ui.theme.SubtleBorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.flowOf
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.Locale
 
 @Composable
-fun NowPlayingScreen(controller: MediaController, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun NowPlayingScreen(
+    controller: MediaController,
+    onBack: () -> Unit,
+    playbackSpeed: Float = 1.0f,
+    onPlaybackSpeedChange: (Float) -> Unit = {},
+    crossfadeSeconds: Int = 2,
+    onCrossfadeSecondsChange: (Int) -> Unit = {},
+    onChangeCoverArt: (String) -> Unit = {},
+    onResetCoverArt: (String) -> Unit = {},
+    onLocateInList: (String) -> Unit = {},
+    dynamicGlowColor: Color? = null,
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
     val database = remember(context) { MusicLibraryDatabase.getInstance(context) }
     val metadataRepository = remember(context) { TrackMetadataRepository(context) }
     var playerState by remember(controller) { mutableStateOf(readNowPlayingState(controller)) }
     val trackFlow = remember(playerState.mediaId) {
-        playerState.mediaId.takeIf(String::isNotBlank)?.let(database.musicTrackDao()::observeTrack) ?: flowOf<com.musicplayer.promax.data.local.MusicTrackEntity?>(null)
+        playerState.mediaId.takeIf(String::isNotBlank)?.let(database.musicTrackDao()::observeTrack)
+            ?: flowOf<MusicTrackEntity?>(null)
     }
     val currentTrack = trackFlow.collectAsStateWithLifecycle(initialValue = null).value
     LaunchedEffect(currentTrack?.trackKey, currentTrack?.artworkFilePath) {
@@ -78,6 +136,9 @@ fun NowPlayingScreen(controller: MediaController, onBack: () -> Unit, modifier: 
     var positionMs by remember(controller) { mutableLongStateOf(controller.currentPosition.coerceAtLeast(0L)) }
     var isSeeking by remember { mutableStateOf(false) }
     val seekingState by rememberUpdatedState(isSeeking)
+    var coverMenuExpanded by remember { mutableStateOf(false) }
+    var showSpeedDialog by remember { mutableStateOf(false) }
+    var showCrossfadeDialog by remember { mutableStateOf(false) }
 
     DisposableEffect(controller) {
         val listener = object : Player.Listener {
@@ -106,94 +167,437 @@ fun NowPlayingScreen(controller: MediaController, onBack: () -> Unit, modifier: 
         else withContext(Dispatchers.IO) { runCatching { BitmapFactory.decodeFile(artworkPath) }.getOrNull() }
     }
 
-    Box(modifier.fillMaxSize().background(MidnightBlack)) {
+    val glowTone = dynamicGlowColor ?: MaterialTheme.colorScheme.primary
+    val activeTrackKey = currentTrack?.trackKey ?: playerState.mediaId.takeIf { it.isNotBlank() }
+
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(MidnightBlack)
+    ) {
         artworkBitmap?.let { image ->
             ArtworkBackdrop(bitmap = image)
         }
         Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    listOf(MidnightBlack.copy(alpha = 0.68f), MaterialTheme.colorScheme.background.copy(alpha = 0.91f), MidnightBlack.copy(alpha = 0.96f))
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            glowTone.copy(alpha = 0.28f),
+                            MaterialTheme.colorScheme.background.copy(alpha = 0.90f),
+                            MidnightBlack.copy(alpha = 0.97f)
+                        )
+                    )
                 )
-            )
         )
-        Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back), tint = MaterialTheme.colorScheme.onBackground)
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 620.dp)
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.testTag("now_playing_back_button")
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            stringResource(R.string.now_playing),
+                            color = MaterialTheme.colorScheme.secondary,
+                            style = MaterialTheme.typography.labelMedium,
+                            letterSpacing = 2.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            (currentTrack?.displayAlbum ?: playerState.album).ifBlank { stringResource(R.string.app_brand_name) },
+                            color = SecondaryText,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (activeTrackKey != null) {
+                        IconButton(
+                            onClick = { onLocateInList(activeTrackKey) },
+                            modifier = Modifier.testTag("now_playing_locate_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.MyLocation,
+                                contentDescription = stringResource(R.string.locate_in_list),
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                        Box {
+                            IconButton(
+                                onClick = { coverMenuExpanded = true },
+                                modifier = Modifier.testTag("now_playing_cover_menu_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.PhotoLibrary,
+                                    contentDescription = stringResource(R.string.change_cover_art),
+                                    tint = MaterialTheme.colorScheme.onBackground
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = coverMenuExpanded,
+                                onDismissRequest = { coverMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.change_cover_art)) },
+                                    leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
+                                    onClick = {
+                                        coverMenuExpanded = false
+                                        onChangeCoverArt(activeTrackKey)
+                                    }
+                                )
+                                if (!artworkPath.isNullOrEmpty()) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.reset_cover_art)) },
+                                        leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null) },
+                                        onClick = {
+                                            coverMenuExpanded = false
+                                            onResetCoverArt(activeTrackKey)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Spacer(Modifier.size(48.dp))
+                    }
                 }
-                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(stringResource(R.string.now_playing), color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelMedium, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
-                    Text((currentTrack?.displayAlbum ?: playerState.album).ifBlank { stringResource(R.string.app_brand_name) }, color = SecondaryText, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Spacer(Modifier.size(48.dp))
-            }
-            Spacer(Modifier.weight(0.55f))
-            artworkBitmap?.let { image ->
-                ArtworkCover(bitmap = image, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp))
-            } ?: VinylArtworkLarge(Modifier.fillMaxWidth().padding(horizontal = 8.dp))
-            Spacer(Modifier.weight(0.6f))
-            Text((currentTrack?.displayTitle ?: playerState.title).ifBlank { stringResource(R.string.no_track_selected) }, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(7.dp))
-            Text((currentTrack?.displayArtist ?: playerState.artist).ifBlank { stringResource(R.string.unknown_artist) }, style = MaterialTheme.typography.bodyLarge, color = SecondaryText, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (lyricLines.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
+
+                Spacer(Modifier.height(14.dp))
+                artworkBitmap?.let { image ->
+                    ArtworkCover(bitmap = image, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp))
+                } ?: VinylArtworkLarge(Modifier.fillMaxWidth().padding(horizontal = 8.dp))
+                Spacer(Modifier.height(22.dp))
+
                 Text(
-                    text = lyricLines.getOrNull(currentLyricIndex)?.text ?: stringResource(R.string.lyrics_waiting),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.secondary,
+                    text = (currentTrack?.displayTitle ?: playerState.title).ifBlank { stringResource(R.string.no_track_selected) },
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.fillMaxWidth().testTag("now_playing_full_title")
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = (currentTrack?.displayArtist ?: playerState.artist).ifBlank { stringResource(R.string.unknown_artist) },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = SecondaryText,
                     textAlign = TextAlign.Center,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                lyricLines.getOrNull(currentLyricIndex + 1)?.let { nextLine ->
-                    Text(nextLine.text, style = MaterialTheme.typography.bodySmall, color = SecondaryText, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+                if (lyricLines.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = lyricLines.getOrNull(currentLyricIndex)?.text ?: stringResource(R.string.lyrics_waiting),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.secondary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    lyricLines.getOrNull(currentLyricIndex + 1)?.let { nextLine ->
+                        Text(
+                            nextLine.text,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SecondaryText,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
-            }
-            Spacer(Modifier.height(22.dp))
-            Slider(
-                value = progress,
-                onValueChange = { value -> isSeeking = true; if (duration > 0L) positionMs = (value * duration).toLong() },
-                onValueChangeFinished = { if (duration > 0L) controller.seekTo(positionMs); isSeeking = false },
-                enabled = duration > 0L,
-                colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.secondary, activeTrackColor = MaterialTheme.colorScheme.primary, inactiveTrackColor = SubtleBorder)
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatTime(positionMs), color = SecondaryText, style = MaterialTheme.typography.labelSmall)
-                Text(formatTime(duration), color = SecondaryText, style = MaterialTheme.typography.labelSmall)
-            }
-            Spacer(Modifier.height(18.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { controller.shuffleModeEnabled = !controller.shuffleModeEnabled }) {
-                    Icon(Icons.Filled.Shuffle, contentDescription = stringResource(R.string.shuffle), tint = if (playerState.shuffleEnabled) MaterialTheme.colorScheme.secondary else SecondaryText)
-                }
-                IconButton(onClick = controller::seekToPreviousMediaItem, modifier = Modifier.size(52.dp)) {
-                    Icon(Icons.Filled.SkipPrevious, contentDescription = stringResource(R.string.previous_track), tint = MaterialTheme.colorScheme.onBackground, modifier = Modifier.size(32.dp))
-                }
-                Surface(onClick = { if (controller.isPlaying) controller.pause() else controller.play() }, shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(76.dp)) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Crossfade(playerState.isPlaying, label = "now_playing_toggle") { playing ->
-                            Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = stringResource(if (playing) R.string.pause else R.string.play), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(38.dp))
+
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        onClick = { showSpeedDialog = true },
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (playbackSpeed != 1.0f) MaterialTheme.colorScheme.primary else SubtleBorder
+                        ),
+                        modifier = Modifier.testTag("now_playing_speed_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Speed,
+                                contentDescription = stringResource(R.string.playback_speed),
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = String.format(Locale.US, "%.2gx", playbackSpeed),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    Spacer(Modifier.size(10.dp))
+                    Surface(
+                        onClick = { showCrossfadeDialog = true },
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (crossfadeSeconds > 0) MaterialTheme.colorScheme.secondary else SubtleBorder
+                        ),
+                        modifier = Modifier.testTag("now_playing_crossfade_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Tune,
+                                contentDescription = stringResource(R.string.smooth_transition),
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = if (crossfadeSeconds <= 0) {
+                                    stringResource(R.string.crossfade_off)
+                                } else {
+                                    stringResource(R.string.crossfade_seconds, crossfadeSeconds)
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium
+                            )
                         }
                     }
                 }
-                IconButton(onClick = controller::seekToNextMediaItem, modifier = Modifier.size(52.dp)) {
-                    Icon(Icons.Filled.SkipNext, contentDescription = stringResource(R.string.next_track), tint = MaterialTheme.colorScheme.onBackground, modifier = Modifier.size(32.dp))
+
+                Spacer(Modifier.height(16.dp))
+                Slider(
+                    value = progress,
+                    onValueChange = { value -> isSeeking = true; if (duration > 0L) positionMs = (value * duration).toLong() },
+                    onValueChangeFinished = { if (duration > 0L) controller.seekTo(positionMs); isSeeking = false },
+                    enabled = duration > 0L,
+                    colors = SliderDefaults.colors(
+                        thumbColor = MaterialTheme.colorScheme.secondary,
+                        activeTrackColor = MaterialTheme.colorScheme.primary,
+                        inactiveTrackColor = SubtleBorder
+                    )
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(formatTime(positionMs), color = SecondaryText, style = MaterialTheme.typography.labelSmall)
+                    Text(formatTime(duration), color = SecondaryText, style = MaterialTheme.typography.labelSmall)
                 }
-                IconButton(onClick = {
-                    controller.repeatMode = when (controller.repeatMode) {
-                        Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
-                        Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
-                        else -> Player.REPEAT_MODE_OFF
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { controller.shuffleModeEnabled = !controller.shuffleModeEnabled }) {
+                        Icon(
+                            Icons.Filled.Shuffle,
+                            contentDescription = stringResource(R.string.shuffle),
+                            tint = if (playerState.shuffleEnabled) MaterialTheme.colorScheme.secondary else SecondaryText
+                        )
                     }
-                }) {
-                    val icon = if (playerState.repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat
-                    Icon(icon, contentDescription = stringResource(R.string.repeat), tint = if (playerState.repeatMode == Player.REPEAT_MODE_OFF) SecondaryText else MaterialTheme.colorScheme.secondary)
+                    IconButton(onClick = controller::seekToPreviousMediaItem, modifier = Modifier.size(52.dp)) {
+                        Icon(
+                            Icons.Filled.SkipPrevious,
+                            contentDescription = stringResource(R.string.previous_track),
+                            tint = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    Surface(
+                        onClick = { if (controller.isPlaying) controller.pause() else controller.play() },
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(76.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Crossfade(playerState.isPlaying, label = "now_playing_toggle") { playing ->
+                                Icon(
+                                    if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                    contentDescription = stringResource(if (playing) R.string.pause else R.string.play),
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(38.dp)
+                                )
+                            }
+                        }
+                    }
+                    IconButton(onClick = controller::seekToNextMediaItem, modifier = Modifier.size(52.dp)) {
+                        Icon(
+                            Icons.Filled.SkipNext,
+                            contentDescription = stringResource(R.string.next_track),
+                            tint = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    IconButton(onClick = {
+                        controller.repeatMode = when (controller.repeatMode) {
+                            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                            else -> Player.REPEAT_MODE_OFF
+                        }
+                    }) {
+                        val icon = if (playerState.repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat
+                        Icon(
+                            icon,
+                            contentDescription = stringResource(R.string.repeat),
+                            tint = if (playerState.repeatMode == Player.REPEAT_MODE_OFF) SecondaryText else MaterialTheme.colorScheme.secondary
+                        )
+                    }
                 }
+                Spacer(Modifier.height(18.dp))
             }
-            Spacer(Modifier.weight(0.6f))
         }
     }
+
+    if (showSpeedDialog) {
+        SpeedControlDialog(
+            currentSpeed = playbackSpeed,
+            onSpeedChange = onPlaybackSpeedChange,
+            onDismiss = { showSpeedDialog = false }
+        )
+    }
+
+    if (showCrossfadeDialog) {
+        CrossfadeControlDialog(
+            currentSeconds = crossfadeSeconds,
+            onSecondsChange = onCrossfadeSecondsChange,
+            onDismiss = { showCrossfadeDialog = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SpeedControlDialog(
+    currentSpeed: Float,
+    onSpeedChange: (Float) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val presets = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(stringResource(R.string.playback_speed))
+                Text(
+                    String.format(Locale.US, "%.2gx", currentSpeed),
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    presets.forEach { preset ->
+                        FilterChip(
+                            selected = kotlin.math.abs(currentSpeed - preset) < 0.03f,
+                            onClick = { onSpeedChange(preset) },
+                            label = { Text(String.format(Locale.US, "%.2gx", preset)) }
+                        )
+                    }
+                }
+                Slider(
+                    value = currentSpeed.coerceIn(0.5f, 2.0f),
+                    onValueChange = { raw ->
+                        val stepped = ((raw * 20f).toInt() / 20f).coerceIn(0.5f, 2.0f)
+                        onSpeedChange(stepped)
+                    },
+                    valueRange = 0.5f..2.0f
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.done)) }
+        },
+        dismissButton = {
+            TextButton(onClick = { onSpeedChange(1.0f) }) { Text(stringResource(R.string.reset_speed)) }
+        }
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CrossfadeControlDialog(
+    currentSeconds: Int,
+    onSecondsChange: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val options = listOf(0, 2, 4, 6, 8)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.smooth_transition)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    stringResource(R.string.crossfade_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SecondaryText
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    options.forEach { seconds ->
+                        FilterChip(
+                            selected = currentSeconds == seconds,
+                            onClick = { onSecondsChange(seconds) },
+                            label = {
+                                Text(
+                                    if (seconds == 0) stringResource(R.string.crossfade_off)
+                                    else stringResource(R.string.crossfade_seconds, seconds)
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.done)) }
+        }
+    )
 }
 
 @Composable
@@ -206,21 +610,27 @@ private fun VinylArtworkLarge(modifier: Modifier = Modifier) {
     )
     Box(modifier, contentAlignment = Alignment.Center) {
         Box(
-            Modifier.fillMaxWidth(0.9f).height(250.dp).clip(RoundedCornerShape(30.dp))
+            Modifier
+                .fillMaxWidth(0.9f)
+                .height(240.dp)
+                .clip(RoundedCornerShape(30.dp))
                 .background(Brush.radialGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f), MidnightBlack, MidnightBlack))),
             contentAlignment = Alignment.Center
         ) {
             Box(
-                Modifier.size(226.dp).graphicsLayer { rotationZ = rotation }.clip(CircleShape)
+                Modifier
+                    .size(216.dp)
+                    .graphicsLayer { rotationZ = rotation }
+                    .clip(CircleShape)
                     .background(Brush.sweepGradient(listOf(MidnightBlack, SubtleBorder, MidnightBlack, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f), MidnightBlack)))
                     .border(1.dp, SubtleBorder, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 repeat(5) { index ->
-                    Box(Modifier.size((190 - index * 25).dp).clip(CircleShape).border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.12f + index * 0.035f), CircleShape))
+                    Box(Modifier.size((180 - index * 24).dp).clip(CircleShape).border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.12f + index * 0.035f), CircleShape))
                 }
-                Box(Modifier.size(92.dp).clip(CircleShape).background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(44.dp))
+                Box(Modifier.size(88.dp).clip(CircleShape).background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
                 }
             }
         }
@@ -232,7 +642,7 @@ private fun ArtworkBackdrop(bitmap: Bitmap) {
     Image(
         bitmap = bitmap.asImageBitmap(),
         contentDescription = null,
-        modifier = Modifier.fillMaxSize().blur(30.dp).graphicsLayer { alpha = 0.32f },
+        modifier = Modifier.fillMaxSize().blur(30.dp).graphicsLayer { alpha = 0.34f },
         contentScale = ContentScale.Crop
     )
 }
@@ -242,17 +652,35 @@ private fun ArtworkCover(bitmap: Bitmap, modifier: Modifier = Modifier) {
     Image(
         bitmap = bitmap.asImageBitmap(),
         contentDescription = stringResource(R.string.album_artwork),
-        modifier = modifier.height(250.dp).clip(RoundedCornerShape(30.dp)),
+        modifier = modifier.height(240.dp).clip(RoundedCornerShape(30.dp)),
         contentScale = ContentScale.Crop
     )
 }
 
-private data class NowPlayingState(val mediaId: String, val title: String, val artist: String, val album: String, val isPlaying: Boolean, val shuffleEnabled: Boolean, val repeatMode: Int, val durationMs: Long)
+private data class NowPlayingState(
+    val mediaId: String,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val isPlaying: Boolean,
+    val shuffleEnabled: Boolean,
+    val repeatMode: Int,
+    val durationMs: Long
+)
 
 private fun readNowPlayingState(player: Player): NowPlayingState {
     val metadata = player.currentMediaItem?.mediaMetadata
     val duration = player.duration.takeUnless { it == C.TIME_UNSET } ?: 0L
-    return NowPlayingState(player.currentMediaItem?.mediaId.orEmpty(), metadata?.title?.toString().orEmpty(), metadata?.artist?.toString().orEmpty(), metadata?.albumTitle?.toString().orEmpty(), player.isPlaying, player.shuffleModeEnabled, player.repeatMode, duration)
+    return NowPlayingState(
+        player.currentMediaItem?.mediaId.orEmpty(),
+        metadata?.title?.toString().orEmpty(),
+        metadata?.artist?.toString().orEmpty(),
+        metadata?.albumTitle?.toString().orEmpty(),
+        player.isPlaying,
+        player.shuffleModeEnabled,
+        player.repeatMode,
+        duration
+    )
 }
 
 private fun formatTime(milliseconds: Long): String {

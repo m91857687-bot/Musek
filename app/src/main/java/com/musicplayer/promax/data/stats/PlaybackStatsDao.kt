@@ -50,6 +50,19 @@ interface PlaybackStatsDao {
         LIMIT :limit
     """)
     fun observeRecentTracks(limit: Int = 5): Flow<List<com.musicplayer.promax.data.local.MusicTrackEntity>>
+
+    @Query("""
+        SELECT t.* FROM music_tracks t
+        INNER JOIN (
+            SELECT trackKey, SUM(playCount) AS totalPlays, SUM(listenedMs) AS totalListened
+            FROM playback_history
+            WHERE playCount > 0 AND playedAt >= (CAST(strftime('%s','now') AS INTEGER) * 1000 - 31536000000)
+            GROUP BY trackKey
+        ) h ON h.trackKey = t.trackKey
+        ORDER BY h.totalPlays DESC, h.totalListened DESC
+        LIMIT :limit
+    """)
+    fun observeMostPlayedTracks(limit: Int = 30): Flow<List<com.musicplayer.promax.data.local.MusicTrackEntity>>
 }
 
 data class TopTrackStat(

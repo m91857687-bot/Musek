@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -67,12 +69,16 @@ fun HomeScreen(
     favoriteKeys: Set<String> = emptySet(),
     activeTrackKey: String? = null,
     repeatingTrackKey: String? = null,
+    highlightedTrackKey: String? = null,
+    listState: LazyListState = rememberLazyListState(),
     recentTracks: List<MusicTrackEntity> = emptyList(),
     favoriteTracks: List<MusicTrackEntity> = emptyList(),
     onPlayTrack: (List<MusicTrackEntity>, MusicTrackEntity) -> Unit = { _, _ -> },
     onToggleRepeatTrack: (List<MusicTrackEntity>, MusicTrackEntity) -> Unit = { _, _ -> },
     onAddToPlaylist: (MusicTrackEntity) -> Unit = {},
     onToggleFavorite: (String) -> Unit = {},
+    onChangeCover: (MusicTrackEntity) -> Unit = {},
+    onResetCover: (MusicTrackEntity) -> Unit = {},
     onShufflePlay: () -> Unit = {},
     onScanMusic: () -> Unit = {},
     onOpenLibrary: () -> Unit,
@@ -89,13 +95,14 @@ fun HomeScreen(
         contentAlignment = Alignment.TopCenter
     ) {
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxWidth()
                 .widthIn(max = 680.dp),
             contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            item(contentType = "header") {
+            item(key = "home_top_bar", contentType = "header") {
                 HomeTopBar(
                     showSearchAction = allTracks.isNotEmpty(),
                     onOpenSearch = onOpenSearch,
@@ -105,7 +112,7 @@ fun HomeScreen(
             }
 
             if (allTracks.isEmpty()) {
-                item {
+                item(key = "home_empty_prompt") {
                     EmptyHomePrompt(
                         onScanMusic = onScanMusic,
                         onOpenLibrary = onOpenLibrary,
@@ -113,7 +120,7 @@ fun HomeScreen(
                     )
                 }
             } else {
-                item {
+                item(key = "home_quick_chips") {
                     QuickActionChipsBar(
                         totalTracksCount = totalTracksCount,
                         favoritesCount = favoritesCount,
@@ -126,14 +133,14 @@ fun HomeScreen(
                 }
 
                 if (recentTracks.isNotEmpty()) {
-                    item {
+                    item(key = "home_recent_header") {
                         HomeSectionHeader(
                             title = stringResource(R.string.recently_played),
                             actionLabel = null,
                             onAction = null
                         )
                     }
-                    item {
+                    item(key = "home_recent_row") {
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 20.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -150,14 +157,14 @@ fun HomeScreen(
                 }
 
                 if (favoriteTracks.isNotEmpty()) {
-                    item {
+                    item(key = "home_favorites_header") {
                         HomeSectionHeader(
                             title = stringResource(R.string.favorites),
                             actionLabel = stringResource(R.string.see_all),
                             onAction = onOpenFavorites
                         )
                     }
-                    item {
+                    item(key = "home_favorites_row") {
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 20.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -173,7 +180,7 @@ fun HomeScreen(
                     }
                 }
 
-                item {
+                item(key = "home_songs_header") {
                     HomeSectionHeader(
                         title = stringResource(R.string.songs),
                         actionLabel = stringResource(R.string.see_all),
@@ -191,18 +198,21 @@ fun HomeScreen(
                             track = track,
                             isCurrentTrack = track.trackKey == activeTrackKey,
                             isRepeatingTrack = track.trackKey == repeatingTrackKey,
+                            isHighlighted = track.trackKey == highlightedTrackKey,
                             isFavorite = track.trackKey in favoriteKeys,
                             onClick = { onPlayTrack(allTracks, track) },
                             onToggleRepeatTrack = { onToggleRepeatTrack(allTracks, track) },
                             onToggleFavorite = { onToggleFavorite(track.trackKey) },
                             onAddToPlaylist = { onAddToPlaylist(track) },
+                            onChangeCover = { onChangeCover(track) },
+                            onResetCover = { onResetCover(track) },
                             showDivider = index < homePreviewTracks.lastIndex
                         )
                     }
                 }
 
                 if (allTracks.size > HOME_PREVIEW_SONG_LIMIT) {
-                    item {
+                    item(key = "home_see_all_button") {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -473,7 +483,7 @@ private fun RecentCoverCard(
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = if (isCurrentTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
@@ -517,7 +527,7 @@ private fun FavoriteShelfTile(
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = if (isCurrentTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
