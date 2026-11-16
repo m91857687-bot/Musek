@@ -12,6 +12,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -31,7 +35,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -52,7 +59,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,6 +66,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -74,6 +81,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -92,6 +100,8 @@ import com.musicplayer.promax.data.local.MusicLibraryDatabase
 import com.musicplayer.promax.data.local.MusicTrackEntity
 import com.musicplayer.promax.data.metadata.LrcParser
 import com.musicplayer.promax.data.metadata.TrackMetadataRepository
+import com.musicplayer.promax.playback.PlaybackController
+import com.musicplayer.promax.playback.QueueItem
 import com.musicplayer.promax.ui.theme.MidnightBlack
 import com.musicplayer.promax.ui.theme.SecondaryText
 import com.musicplayer.promax.ui.theme.SubtleBorder
@@ -120,6 +130,7 @@ fun NowPlayingScreen(
     val database = remember(context) { MusicLibraryDatabase.getInstance(context) }
     val metadataRepository = remember(context) { TrackMetadataRepository(context) }
     var playerState by remember(controller) { mutableStateOf(readNowPlayingState(controller)) }
+    var queueItems by remember(controller) { mutableStateOf(PlaybackController.readQueue(controller)) }
     val trackFlow = remember(playerState.mediaId) {
         playerState.mediaId.takeIf(String::isNotBlank)?.let(database.musicTrackDao()::observeTrack)
             ?: flowOf<MusicTrackEntity?>(null)
@@ -139,11 +150,15 @@ fun NowPlayingScreen(
     var coverMenuExpanded by remember { mutableStateOf(false) }
     var showSpeedDialog by remember { mutableStateOf(false) }
     var showCrossfadeDialog by remember { mutableStateOf(false) }
+    var showQueueSheet by remember { mutableStateOf(false) }
+    var showFullscreenLyrics by remember { mutableStateOf(false) }
+    var showCarMode by remember { mutableStateOf(false) }
 
     DisposableEffect(controller) {
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
                 playerState = readNowPlayingState(player)
+                queueItems = PlaybackController.readQueue(player)
                 if (!seekingState) positionMs = player.currentPosition.coerceAtLeast(0L)
             }
         }
@@ -204,8 +219,20 @@ fun NowPlayingScreen(
                     .padding(horizontal = 24.dp, vertical = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                var verticalDragSum by remember { mutableFloatStateOf(0f) }
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures(
+                                onDragStart = { verticalDragSum = 0f },
+                                onDragEnd = {
+                                    if (verticalDragSum > 110f) onBack()
+                                    verticalDragSum = 0f
+                                },
+                                onVerticalDrag = { _, dragAmount -> verticalDragSum += dragAmount }
+                            )
+                        },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
@@ -286,9 +313,31 @@ fun NowPlayingScreen(
                 }
 
                 Spacer(Modifier.height(14.dp))
-                artworkBitmap?.let { image ->
-                    ArtworkCover(bitmap = image, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp))
-                } ?: VinylArtworkLarge(Modifier.fillMaxWidth().padding(horizontal = 8.dp))
+                var horizontalSwipeAccum by remember { mutableFloatStateOf(0f) }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInput(controller) {
+                            detectHorizontalDragGestures(
+                                onDragStart = { horizontalSwipeAccum = 0f },
+                                onDragEnd = {
+                                    if (horizontalSwipeAccum <= -110f) {
+                                        controller.seekToNextMediaItem()
+                                    } else if (horizontalSwipeAccum >= 110f) {
+                                        controller.seekToPreviousMediaItem()
+                                    }
+                                    horizontalSwipeAccum = 0f
+                                },
+                                onHorizontalDrag = { _, dragAmount ->
+                                    horizontalSwipeAccum += dragAmount
+                                }
+                            )
+                        }
+                ) {
+                    artworkBitmap?.let { image ->
+                        ArtworkCover(bitmap = image, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp))
+                    } ?: VinylArtworkLarge(Modifier.fillMaxWidth().padding(horizontal = 8.dp))
+                }
                 Spacer(Modifier.height(22.dp))
 
                 Text(
@@ -311,31 +360,41 @@ fun NowPlayingScreen(
 
                 if (lyricLines.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = lyricLines.getOrNull(currentLyricIndex)?.text ?: stringResource(R.string.lyrics_waiting),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.secondary,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    lyricLines.getOrNull(currentLyricIndex + 1)?.let { nextLine ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { showFullscreenLyrics = true }
+                            .padding(vertical = 6.dp, horizontal = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Text(
-                            nextLine.text,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = SecondaryText,
+                            text = lyricLines.getOrNull(currentLyricIndex)?.text ?: stringResource(R.string.lyrics_waiting),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.secondary,
                             textAlign = TextAlign.Center,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
+                        lyricLines.getOrNull(currentLyricIndex + 1)?.let { nextLine ->
+                            Text(
+                                nextLine.text,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = SecondaryText,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
 
-                Spacer(Modifier.height(16.dp))
-                Row(
+                Spacer(Modifier.height(14.dp))
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Surface(
                         onClick = { showSpeedDialog = true },
@@ -348,9 +407,9 @@ fun NowPlayingScreen(
                         modifier = Modifier.testTag("now_playing_speed_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Speed,
@@ -365,7 +424,6 @@ fun NowPlayingScreen(
                             )
                         }
                     }
-                    Spacer(Modifier.size(10.dp))
                     Surface(
                         onClick = { showCrossfadeDialog = true },
                         shape = RoundedCornerShape(50),
@@ -377,9 +435,9 @@ fun NowPlayingScreen(
                         modifier = Modifier.testTag("now_playing_crossfade_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Tune,
@@ -398,19 +456,98 @@ fun NowPlayingScreen(
                             )
                         }
                     }
+                    Surface(
+                        onClick = {
+                            queueItems = PlaybackController.readQueue(controller)
+                            showQueueSheet = true
+                        },
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                        border = BorderStroke(1.dp, SubtleBorder),
+                        modifier = Modifier.testTag("now_playing_queue_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                                contentDescription = stringResource(R.string.queue_title),
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "${stringResource(R.string.queue_title)} (${queueItems.size})",
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    }
+                    Surface(
+                        onClick = { showFullscreenLyrics = true },
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                        border = BorderStroke(1.dp, SubtleBorder),
+                        modifier = Modifier.testTag("now_playing_lyrics_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Lyrics,
+                                contentDescription = stringResource(R.string.fullscreen_lyrics),
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.fullscreen_lyrics),
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    }
+                    Surface(
+                        onClick = { showCarMode = true },
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                        border = BorderStroke(1.dp, SubtleBorder),
+                        modifier = Modifier.testTag("now_playing_car_mode_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.DirectionsCar,
+                                contentDescription = stringResource(R.string.car_mode),
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.car_mode),
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(16.dp))
-                Slider(
-                    value = progress,
-                    onValueChange = { value -> isSeeking = true; if (duration > 0L) positionMs = (value * duration).toLong() },
-                    onValueChangeFinished = { if (duration > 0L) controller.seekTo(positionMs); isSeeking = false },
+                WaveformSeekbar(
+                    trackKeySeed = activeTrackKey ?: playerState.title,
+                    progress = progress,
                     enabled = duration > 0L,
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.secondary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary,
-                        inactiveTrackColor = SubtleBorder
-                    )
+                    primaryColor = MaterialTheme.colorScheme.primary,
+                    secondaryColor = MaterialTheme.colorScheme.secondary,
+                    onSeekFraction = { value ->
+                        isSeeking = true
+                        if (duration > 0L) positionMs = (value * duration).toLong()
+                    },
+                    onSeekFinished = {
+                        if (duration > 0L) controller.seekTo(positionMs)
+                        isSeeking = false
+                    }
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(formatTime(positionMs), color = SecondaryText, style = MaterialTheme.typography.labelSmall)
@@ -480,6 +617,53 @@ fun NowPlayingScreen(
                 Spacer(Modifier.height(18.dp))
             }
         }
+
+        if (showFullscreenLyrics) {
+            FullscreenLyricsOverlay(
+                title = (currentTrack?.displayTitle ?: playerState.title).ifBlank { stringResource(R.string.no_track_selected) },
+                artist = (currentTrack?.displayArtist ?: playerState.artist).ifBlank { stringResource(R.string.unknown_artist) },
+                artworkBitmap = artworkBitmap,
+                lyrics = lyricLines,
+                currentIndex = currentLyricIndex,
+                onSeekToLine = { timeMs ->
+                    controller.seekTo(timeMs)
+                    positionMs = timeMs
+                },
+                onClose = { showFullscreenLyrics = false }
+            )
+        }
+
+        if (showCarMode) {
+            CarModeOverlay(
+                title = (currentTrack?.displayTitle ?: playerState.title),
+                artist = (currentTrack?.displayArtist ?: playerState.artist),
+                isPlaying = playerState.isPlaying,
+                progress = progress,
+                onPrevious = controller::seekToPreviousMediaItem,
+                onTogglePlayPause = { if (controller.isPlaying) controller.pause() else controller.play() },
+                onNext = controller::seekToNextMediaItem,
+                onExit = { showCarMode = false }
+            )
+        }
+    }
+
+    if (showQueueSheet) {
+        QueueBottomSheet(
+            queueItems = queueItems,
+            onJumpToIndex = { idx ->
+                PlaybackController.jumpToQueueIndex(controller, idx)
+                queueItems = PlaybackController.readQueue(controller)
+            },
+            onMoveItem = { from, to ->
+                PlaybackController.moveQueueItem(controller, from, to)
+                queueItems = PlaybackController.readQueue(controller)
+            },
+            onRemoveItem = { idx ->
+                PlaybackController.removeQueueItem(controller, idx)
+                queueItems = PlaybackController.readQueue(controller)
+            },
+            onDismiss = { showQueueSheet = false }
+        )
     }
 
     if (showSpeedDialog) {

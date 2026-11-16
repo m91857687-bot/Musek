@@ -18,6 +18,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -88,6 +91,7 @@ import com.musicplayer.promax.presentation.components.TrackArtworkBox
 import com.musicplayer.promax.presentation.equalizer.EqualizerScreen
 import com.musicplayer.promax.presentation.home.HomeScreen
 import com.musicplayer.promax.presentation.library.LIBRARY_TRACK_LIST_HEADER_COUNT
+import com.musicplayer.promax.presentation.library.LibraryBrowserTab
 import com.musicplayer.promax.presentation.library.LibraryScreen
 import com.musicplayer.promax.presentation.library.MusicLibraryViewModel
 import com.musicplayer.promax.presentation.player.NowPlayingScreen
@@ -101,6 +105,8 @@ import com.musicplayer.promax.ui.theme.MusicPlayerProMaxTheme
 import com.musicplayer.promax.ui.theme.SubtleBorder
 import kotlinx.coroutines.delay
 import java.io.File
+import java.util.Locale
+import kotlin.math.abs
 
 @Composable
 fun MusicPlayerProMaxApp(
@@ -199,15 +205,50 @@ fun MusicPlayerProMaxApp(
         }
     }
 
+    val m3uImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            val fallbackName = uri.lastPathSegment
+                ?.substringAfterLast('/')
+                ?.substringBeforeLast('.')
+                ?.ifBlank { context.getString(R.string.playlists) }
+                ?: context.getString(R.string.playlists)
+            musicLibraryViewModel.importM3uPlaylist(fallbackName, uri) { result ->
+                val count = result.getOrNull()
+                val msg = if (count != null && count > 0) {
+                    context.getString(R.string.m3u_imported, count)
+                } else {
+                    context.getString(R.string.m3u_import_failed)
+                }
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    var pendingM3uExport by remember { mutableStateOf<Pair<String, List<MusicTrackEntity>>?>(null) }
+    val m3uExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/x-mpegurl")) { uri: Uri? ->
+        val payload = pendingM3uExport
+        if (uri != null && payload != null) {
+            musicLibraryViewModel.exportM3uPlaylist(payload.first, payload.second, uri) { ok ->
+                Toast.makeText(
+                    context,
+                    if (ok) context.getString(R.string.m3u_exported) else context.getString(R.string.m3u_export_failed),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        pendingM3uExport = null
+    }
+
     val selectedDestinationState = rememberSaveable { mutableStateOf(AppDestination.HOME) }
     val selectedDestination = selectedDestinationState.value
     val showNowPlaying = rememberSaveable { mutableStateOf(false) }
     val showInsights = rememberSaveable { mutableStateOf(false) }
     val showSettings = rememberSaveable { mutableStateOf(false) }
     val focusSearchRequest = remember { mutableStateOf(false) }
+    var requestedLibraryTab by remember { mutableStateOf<LibraryBrowserTab?>(null) }
+    var requestedLibraryGroup by remember { mutableStateOf<String?>(null) }
     var trackForPlaylistDialog by remember { mutableStateOf<MusicTrackEntity?>(null) }
 
-    // Hoisted scroll states preserve exact scroll positions across playback & navigation.
     val homeListState = rememberLazyListState()
     val libraryListState = rememberLazyListState()
     val playlistsListState = rememberLazyListState()
@@ -261,10 +302,37 @@ fun MusicPlayerProMaxApp(
         }
     }
 
+    val enqueuePlayNext: (MusicTrackEntity) -> Unit = { track ->
+        playbackController?.let { controller ->
+            PlaybackController.playNext(controller, track)
+            Toast.makeText(context, context.getString(R.string.added_to_play_next), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val openArtistGroup: (String) -> Unit = { artistName ->
+        showNowPlaying.value = false
+        showInsights.value = false
+        showSettings.value = false
+        requestedLibraryTab = LibraryBrowserTab.ARTISTS
+        requestedLibraryGroup = artistName
+        selectedDestinationState.value = AppDestination.LIBRARY
+    }
+
+    val openAlbumGroup: (String) -> Unit = { albumName ->
+        showNowPlaying.value = false
+        showInsights.value = false
+        showSettings.value = false
+        requestedLibraryTab = LibraryBrowserTab.ALBUMS
+        requestedLibraryGroup = albumName
+        selectedDestinationState.value = AppDestination.LIBRARY
+    }
+
     val locateTrackInList: (String) -> Unit = { trackKey ->
         showNowPlaying.value = false
         showInsights.value = false
         showSettings.value = false
+        requestedLibraryTab = LibraryBrowserTab.SONGS
+        requestedLibraryGroup = null
         selectedDestinationState.value = AppDestination.LIBRARY
         if (libraryState.tracks.none { it.trackKey == trackKey }) {
             if (libraryState.searchQuery.isNotEmpty()) musicLibraryViewModel.setSearchQuery("")
@@ -340,6 +408,12 @@ fun MusicPlayerProMaxApp(
                             MiniPlayer(
                                 controller = controller,
                                 artworkPath = activeArtworkPath,
+                                playbackSpeed = settingsState.playbackSpeed,
+                                onSpeedBadgeClick = {
+                                    showSettings.value = false
+                                    showInsights.value = false
+                                    selectedDestinationState.value = AppDestination.EQUALIZER
+                                },
                                 onExpand = { showNowPlaying.value = true }
                             )
                         }
@@ -408,6 +482,8 @@ fun MusicPlayerProMaxApp(
                                 internalMusicEnabled = settingsState.internalMusicEnabled,
                                 externalMusicEnabled = settingsState.externalMusicEnabled,
                                 externalTreeUri = settingsState.externalTreeUri,
+                                minTrackDurationSeconds = settingsState.minTrackDurationSeconds,
+                                shakeToSkipEnabled = settingsState.shakeToSkipEnabled,
                                 onInternalMusicEnabledChanged = { enabled ->
                                     settingsViewModel.setInternalMusicEnabled(enabled) {
                                         musicLibraryViewModel.scan()
@@ -419,6 +495,8 @@ fun MusicPlayerProMaxApp(
                                     }
                                 },
                                 onChooseExternalFolder = { folderPicker.launch(null) },
+                                onMinTrackDurationChanged = settingsViewModel::setMinTrackDurationSeconds,
+                                onShakeToSkipChanged = settingsViewModel::setShakeToSkipEnabled,
                                 onBack = { showSettings.value = false }
                             )
                         }
@@ -447,6 +525,9 @@ fun MusicPlayerProMaxApp(
                                         showNowPlaying.value = true
                                     }
                                 },
+                                onPlayNext = enqueuePlayNext,
+                                onGoToArtist = openArtistGroup,
+                                onGoToAlbum = openAlbumGroup,
                                 onToggleRepeatTrack = toggleRepeatForTrack,
                                 onAddToPlaylist = { track -> trackForPlaylistDialog = track },
                                 onToggleFavorite = musicLibraryViewModel::toggleFavorite,
@@ -492,6 +573,12 @@ fun MusicPlayerProMaxApp(
                                 listState = libraryListState,
                                 focusSearchRequest = focusSearchRequest.value,
                                 onSearchFocusConsumed = { focusSearchRequest.value = false },
+                                requestedTab = requestedLibraryTab,
+                                requestedGroupName = requestedLibraryGroup,
+                                onNavigationRequestConsumed = {
+                                    requestedLibraryTab = null
+                                    requestedLibraryGroup = null
+                                },
                                 hasAudioPermission = hasScanAccess,
                                 onTrackClick = { track ->
                                     playbackController?.let { controller ->
@@ -499,7 +586,15 @@ fun MusicPlayerProMaxApp(
                                         showNowPlaying.value = true
                                     }
                                 },
+                                onPlayGroupTracks = { tracks, selected ->
+                                    playbackController?.let { controller ->
+                                        PlaybackController.playQueue(controller, tracks, selected)
+                                        showNowPlaying.value = true
+                                    }
+                                },
+                                onPlayNext = enqueuePlayNext,
                                 onToggleRepeatTrack = { track -> toggleRepeatForTrack(libraryState.tracks, track) },
+                                onToggleRepeatGroupTrack = toggleRepeatForTrack,
                                 onScanClick = {
                                     if (hasScanAccess) musicLibraryViewModel.scan()
                                     else permissionLauncher.launch(permissionName)
@@ -508,6 +603,9 @@ fun MusicPlayerProMaxApp(
                                 onSortChanged = musicLibraryViewModel::setSortMode,
                                 onFavoritesOnlyChanged = musicLibraryViewModel::setFavoritesOnly,
                                 onToggleFavorite = musicLibraryViewModel::toggleFavorite,
+                                onBatchAddFavorites = musicLibraryViewModel::addFavoritesBatch,
+                                onBatchAddToPlaylist = musicLibraryViewModel::addTracksToPlaylistBatch,
+                                onCreatePlaylist = musicLibraryViewModel::createPlaylist,
                                 onAddToPlaylistRequest = { track -> trackForPlaylistDialog = track },
                                 onUpdateMetadata = musicLibraryViewModel::updateTrackMetadata,
                                 onImportLyrics = { trackKey ->
@@ -536,15 +634,29 @@ fun MusicPlayerProMaxApp(
                                 onToggleFavorite = musicLibraryViewModel::toggleFavorite,
                                 onChangeCover = { track -> launchCoverPicker(track.trackKey) },
                                 onResetCover = { track -> musicLibraryViewModel.resetTrackArtwork(track.trackKey) },
+                                onImportM3uClick = {
+                                    m3uImportLauncher.launch(arrayOf("audio/x-mpegurl", "audio/mpegurl", "application/vnd.apple.mpegurl", "*/*"))
+                                },
+                                onExportM3uClick = { name, tracks ->
+                                    pendingM3uExport = name to tracks
+                                    val safeFileName = name.replace(Regex("[^\\p{L}\\p{Nd}_ -]+"), "_").ifBlank { "playlist" }
+                                    m3uExportLauncher.launch("$safeFileName.m3u")
+                                },
                                 onOpenSettings = { showSettings.value = true }
                             )
                             AppDestination.EQUALIZER -> EqualizerScreen(
                                 settingsState = settingsState,
                                 onEffectsEnabledChanged = settingsViewModel::setAudioEffectsEnabled,
                                 onPresetSelected = settingsViewModel::setEqPresetName,
+                                onBandLevelsChanged = settingsViewModel::setEqBandLevelsMb,
+                                onSaveCustomProfile = settingsViewModel::saveCustomEqProfile,
+                                onDeleteCustomProfile = settingsViewModel::deleteCustomEqProfile,
+                                onApplyCustomProfile = settingsViewModel::applyCustomEqProfile,
                                 onBassChanged = settingsViewModel::setBassBoostStrength,
                                 onVirtualizerChanged = settingsViewModel::setVirtualizerStrength,
                                 onLoudnessChanged = settingsViewModel::setLoudnessGainMb,
+                                onStereoBalanceChanged = settingsViewModel::setStereoBalance,
+                                onSkipSilenceChanged = settingsViewModel::setSkipSilenceEnabled,
                                 onPlaybackSpeedChanged = settingsViewModel::setPlaybackSpeed,
                                 onCrossfadeSecondsChanged = settingsViewModel::setCrossfadeSeconds,
                                 onOpenSettings = { showSettings.value = true }
@@ -606,7 +718,13 @@ fun MusicPlayerProMaxApp(
 }
 
 @Composable
-private fun MiniPlayer(controller: MediaController, artworkPath: String?, onExpand: () -> Unit) {
+private fun MiniPlayer(
+    controller: MediaController,
+    artworkPath: String?,
+    playbackSpeed: Float = 1.0f,
+    onSpeedBadgeClick: () -> Unit = {},
+    onExpand: () -> Unit
+) {
     val playerState = remember(controller) { mutableStateOf(readPlayerState(controller)) }
     val positionMs = remember(controller) { mutableLongStateOf(controller.currentPosition.coerceAtLeast(0L)) }
 
@@ -631,6 +749,7 @@ private fun MiniPlayer(controller: MediaController, artworkPath: String?, onExpa
 
     if (state.title.isBlank()) return
     val progress = if (state.durationMs > 0L) (positionMs.longValue.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+    var horizontalSwipeAccum by remember { mutableFloatStateOf(0f) }
 
     Surface(
         onClick = onExpand,
@@ -641,6 +760,17 @@ private fun MiniPlayer(controller: MediaController, artworkPath: String?, onExpa
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
+            .pointerInput(controller) {
+                detectHorizontalDragGestures(
+                    onDragStart = { horizontalSwipeAccum = 0f },
+                    onDragEnd = {
+                        if (horizontalSwipeAccum <= -90f) controller.seekToNextMediaItem()
+                        else if (horizontalSwipeAccum >= 90f) controller.seekToPreviousMediaItem()
+                        horizontalSwipeAccum = 0f
+                    },
+                    onHorizontalDrag = { _, dragAmount -> horizontalSwipeAccum += dragAmount }
+                )
+            }
             .testTag("mini_player_card")
     ) {
         Column {
@@ -679,6 +809,22 @@ private fun MiniPlayer(controller: MediaController, artworkPath: String?, onExpa
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                if (abs(playbackSpeed - 1.0f) >= 0.03f) {
+                    Surface(
+                        onClick = onSpeedBadgeClick,
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                        modifier = Modifier.padding(end = 2.dp).testTag("mini_player_speed_badge")
+                    ) {
+                        Text(
+                            text = String.format(Locale.US, "%.2gx", playbackSpeed),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                        )
+                    }
                 }
                 IconButton(
                     onClick = {

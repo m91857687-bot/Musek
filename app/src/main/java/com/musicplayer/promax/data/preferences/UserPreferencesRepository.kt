@@ -34,6 +34,12 @@ class DataStoreUserPreferencesRepository(private val context: Context) : UserPre
         val INTERNAL_MUSIC_ENABLED = booleanPreferencesKey("internal_music_enabled")
         val EXTERNAL_MUSIC_ENABLED = booleanPreferencesKey("external_music_enabled")
         val EXTERNAL_TREE_URI = stringPreferencesKey("external_tree_uri")
+        val EQ_BAND_LEVELS_MB = stringPreferencesKey("eq_band_levels_mb")
+        val CUSTOM_EQ_PROFILES_JSON = stringPreferencesKey("custom_eq_profiles_json")
+        val STEREO_BALANCE = floatPreferencesKey("stereo_balance")
+        val SKIP_SILENCE_ENABLED = booleanPreferencesKey("skip_silence_enabled")
+        val MIN_TRACK_DURATION_SECONDS = intPreferencesKey("min_track_duration_seconds")
+        val SHAKE_TO_SKIP_ENABLED = booleanPreferencesKey("shake_to_skip_enabled")
     }
 
     override val language: Flow<AppLanguage> = context.userPreferencesDataStore.data.map { AppLanguage.fromStoredValue(it[Keys.LANGUAGE]) }
@@ -51,6 +57,12 @@ class DataStoreUserPreferencesRepository(private val context: Context) : UserPre
     override val internalMusicEnabled: Flow<Boolean> = context.userPreferencesDataStore.data.map { it[Keys.INTERNAL_MUSIC_ENABLED] ?: true }
     override val externalMusicEnabled: Flow<Boolean> = context.userPreferencesDataStore.data.map { it[Keys.EXTERNAL_MUSIC_ENABLED] ?: true }
     override val externalTreeUri: Flow<String?> = context.userPreferencesDataStore.data.map { it[Keys.EXTERNAL_TREE_URI] }
+    override val eqBandLevelsMb: Flow<String?> = context.userPreferencesDataStore.data.map { it[Keys.EQ_BAND_LEVELS_MB] }
+    override val customEqProfilesJson: Flow<String?> = context.userPreferencesDataStore.data.map { it[Keys.CUSTOM_EQ_PROFILES_JSON] }
+    override val stereoBalance: Flow<Float> = context.userPreferencesDataStore.data.map { (it[Keys.STEREO_BALANCE] ?: 0f).coerceIn(-1f, 1f) }
+    override val skipSilenceEnabled: Flow<Boolean> = context.userPreferencesDataStore.data.map { it[Keys.SKIP_SILENCE_ENABLED] ?: false }
+    override val minTrackDurationSeconds: Flow<Int> = context.userPreferencesDataStore.data.map { (it[Keys.MIN_TRACK_DURATION_SECONDS] ?: 0).coerceIn(0, 600) }
+    override val shakeToSkipEnabled: Flow<Boolean> = context.userPreferencesDataStore.data.map { it[Keys.SHAKE_TO_SKIP_ENABLED] ?: false }
 
     override suspend fun setLanguage(language: AppLanguage) {
         context.userPreferencesDataStore.edit { it[Keys.LANGUAGE] = language.name }
@@ -116,5 +128,33 @@ class DataStoreUserPreferencesRepository(private val context: Context) : UserPre
         context.userPreferencesDataStore.edit {
             if (uri == null) it.remove(Keys.EXTERNAL_TREE_URI) else it[Keys.EXTERNAL_TREE_URI] = uri
         }
+    }
+
+    override suspend fun setEqBandLevelsMb(levelsCsv: String?) {
+        context.userPreferencesDataStore.edit {
+            if (levelsCsv == null) it.remove(Keys.EQ_BAND_LEVELS_MB) else it[Keys.EQ_BAND_LEVELS_MB] = levelsCsv
+        }
+    }
+
+    override suspend fun setCustomEqProfilesJson(json: String?) {
+        context.userPreferencesDataStore.edit {
+            if (json == null) it.remove(Keys.CUSTOM_EQ_PROFILES_JSON) else it[Keys.CUSTOM_EQ_PROFILES_JSON] = json
+        }
+    }
+
+    override suspend fun setStereoBalance(balance: Float) {
+        context.userPreferencesDataStore.edit { it[Keys.STEREO_BALANCE] = balance.coerceIn(-1f, 1f) }
+    }
+
+    override suspend fun setSkipSilenceEnabled(enabled: Boolean) {
+        context.userPreferencesDataStore.edit { it[Keys.SKIP_SILENCE_ENABLED] = enabled }
+    }
+
+    override suspend fun setMinTrackDurationSeconds(seconds: Int) {
+        context.userPreferencesDataStore.edit { it[Keys.MIN_TRACK_DURATION_SECONDS] = seconds.coerceIn(0, 600) }
+    }
+
+    override suspend fun setShakeToSkipEnabled(enabled: Boolean) {
+        context.userPreferencesDataStore.edit { it[Keys.SHAKE_TO_SKIP_ENABLED] = enabled }
     }
 }

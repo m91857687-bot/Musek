@@ -21,6 +21,12 @@ interface UserPreferencesRepository {
     val internalMusicEnabled: Flow<Boolean>
     val externalMusicEnabled: Flow<Boolean>
     val externalTreeUri: Flow<String?>
+    val eqBandLevelsMb: Flow<String?>
+    val customEqProfilesJson: Flow<String?>
+    val stereoBalance: Flow<Float>
+    val skipSilenceEnabled: Flow<Boolean>
+    val minTrackDurationSeconds: Flow<Int>
+    val shakeToSkipEnabled: Flow<Boolean>
     suspend fun setLanguage(language: AppLanguage)
     suspend fun setTheme(theme: AppTheme)
     suspend fun setAccent(accent: AppAccent)
@@ -36,4 +42,10 @@ interface UserPreferencesRepository {
     suspend fun setInternalMusicEnabled(enabled: Boolean)
     suspend fun setExternalMusicEnabled(enabled: Boolean)
     suspend fun setExternalTreeUri(uri: String?)
+    suspend fun setEqBandLevelsMb(levelsCsv: String?)
+    suspend fun setCustomEqProfilesJson(json: String?)
+    suspend fun setStereoBalance(balance: Float)
+    suspend fun setSkipSilenceEnabled(enabled: Boolean)
+    suspend fun setMinTrackDurationSeconds(seconds: Int)
+    suspend fun setShakeToSkipEnabled(enabled: Boolean)
 }

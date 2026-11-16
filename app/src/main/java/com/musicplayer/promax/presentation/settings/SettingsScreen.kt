@@ -30,8 +30,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -85,9 +88,13 @@ fun SettingsScreen(
     internalMusicEnabled: Boolean,
     externalMusicEnabled: Boolean,
     externalTreeUri: String?,
+    minTrackDurationSeconds: Int = 0,
+    shakeToSkipEnabled: Boolean = false,
     onInternalMusicEnabledChanged: (Boolean) -> Unit,
     onExternalMusicEnabledChanged: (Boolean) -> Unit,
     onChooseExternalFolder: () -> Unit,
+    onMinTrackDurationChanged: (Int) -> Unit = {},
+    onShakeToSkipChanged: (Boolean) -> Unit = {},
     onBack: (() -> Unit)? = null
 ) {
     Box(
@@ -201,6 +208,31 @@ fun SettingsScreen(
                     }
                     Text(stringResource(R.string.choose), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                 }
+                HorizontalDivider(color = SubtleBorder.copy(alpha = 0.5f))
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(stringResource(R.string.min_duration_filter), style = MaterialTheme.typography.bodyLarge)
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(0, 15, 30, 60).forEach { seconds ->
+                            FilterChip(
+                                selected = minTrackDurationSeconds == seconds,
+                                onClick = { onMinTrackDurationChanged(seconds) },
+                                label = {
+                                    Text(
+                                        if (seconds == 0) stringResource(R.string.min_duration_all)
+                                        else stringResource(R.string.min_duration_seconds, seconds)
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
             }
 
             SettingsGroup(title = stringResource(R.string.appearance)) {
@@ -209,6 +241,12 @@ fun SettingsScreen(
                     subtitle = stringResource(R.string.dynamic_artwork_theme_description),
                     checked = dynamicArtworkThemeEnabled,
                     onCheckedChange = onDynamicArtworkThemeChanged
+                )
+                SettingSwitch(
+                    title = stringResource(R.string.shake_to_skip),
+                    subtitle = stringResource(R.string.shake_to_skip_description),
+                    checked = shakeToSkipEnabled,
+                    onCheckedChange = onShakeToSkipChanged
                 )
                 HorizontalDivider(color = SubtleBorder.copy(alpha = 0.5f))
                 SettingChoice(

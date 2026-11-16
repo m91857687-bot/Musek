@@ -1,5 +1,7 @@
 package com.musicplayer.promax.presentation.library
 
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,11 +48,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -58,6 +63,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.musicplayer.promax.R
 import com.musicplayer.promax.data.local.MusicTrackEntity
+import com.musicplayer.promax.presentation.components.BatchPlaylistSelectDialog
 import com.musicplayer.promax.presentation.components.EditorialTrackRow
 import com.musicplayer.promax.presentation.components.FeatureEmptyState
 import com.musicplayer.promax.presentation.components.PremiumScreenHeader
@@ -76,14 +82,23 @@ fun LibraryScreen(
     listState: LazyListState = rememberLazyListState(),
     focusSearchRequest: Boolean = false,
     onSearchFocusConsumed: () -> Unit = {},
+    requestedTab: LibraryBrowserTab? = null,
+    requestedGroupName: String? = null,
+    onNavigationRequestConsumed: () -> Unit = {},
     onScanClick: () -> Unit,
     hasAudioPermission: Boolean,
     onTrackClick: (MusicTrackEntity) -> Unit,
+    onPlayGroupTracks: (List<MusicTrackEntity>, MusicTrackEntity) -> Unit = { _, track -> onTrackClick(track) },
+    onPlayNext: (MusicTrackEntity) -> Unit = {},
     onToggleRepeatTrack: (MusicTrackEntity) -> Unit = {},
+    onToggleRepeatGroupTrack: (List<MusicTrackEntity>, MusicTrackEntity) -> Unit = { _, track -> onToggleRepeatTrack(track) },
     onSearchChanged: (String) -> Unit,
     onSortChanged: (String) -> Unit,
     onFavoritesOnlyChanged: (Boolean) -> Unit,
     onToggleFavorite: (String) -> Unit,
+    onBatchAddFavorites: (Set<String>) -> Unit = {},
+    onBatchAddToPlaylist: (Long, Set<String>) -> Unit = { _, _ -> },
+    onCreatePlaylist: (String, (Boolean) -> Unit) -> Unit = { _, cb -> cb(false) },
     onAddToPlaylistRequest: (MusicTrackEntity) -> Unit,
     onUpdateMetadata: (String, String, String, String) -> Unit,
     onImportLyrics: (String) -> Unit,
@@ -91,8 +106,38 @@ fun LibraryScreen(
     onResetCover: (MusicTrackEntity) -> Unit = {},
     onOpenSettings: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var trackForEditKey by remember { mutableStateOf<String?>(null) }
+    var activeTabName by rememberSaveable { mutableStateOf(LibraryBrowserTab.SONGS.name) }
+    val activeTab = remember(activeTabName) {
+        runCatching { LibraryBrowserTab.valueOf(activeTabName) }.getOrDefault(LibraryBrowserTab.SONGS)
+    }
+    var selectedAlbumName by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedArtistName by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedFolderPath by rememberSaveable { mutableStateOf<String?>(null) }
+
+    var selectedTrackKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var showBatchPlaylistDialog by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = selectionMode) {
+        selectionMode = false
+        selectedTrackKeys = emptySet()
+    }
+
+    LaunchedEffect(requestedTab, requestedGroupName) {
+        if (requestedTab != null) {
+            activeTabName = requestedTab.name
+            selectedAlbumName = if (requestedTab == LibraryBrowserTab.ALBUMS) requestedGroupName else null
+            selectedArtistName = if (requestedTab == LibraryBrowserTab.ARTISTS) requestedGroupName else null
+            selectedFolderPath = if (requestedTab == LibraryBrowserTab.FOLDERS) requestedGroupName else null
+            selectionMode = false
+            selectedTrackKeys = emptySet()
+            onNavigationRequestConsumed()
+        }
+    }
+
     val trackForEdit = trackForEditKey?.let { key ->
         state.tracks.firstOrNull { it.trackKey == key } ?: state.homeTracks.firstOrNull { it.trackKey == key }
     }
@@ -100,163 +145,386 @@ fun LibraryScreen(
     val focusManager = LocalFocusManager.current
     LaunchedEffect(focusSearchRequest, state.trackCount) {
         if (focusSearchRequest && state.trackCount > 0) {
+            activeTabName = LibraryBrowserTab.SONGS.name
+            selectedAlbumName = null
+            selectedArtistName = null
+            selectedFolderPath = null
             runCatching { searchFocusRequester.requestFocus() }
             onSearchFocusConsumed()
         }
     }
+
+    val selectedAlbum = selectedAlbumName?.let { name -> state.albums.firstOrNull { it.name == name } }
+    val selectedArtist = selectedArtistName?.let { name -> state.artists.firstOrNull { it.name == name } }
+    val selectedFolder = selectedFolderPath?.let { path -> state.folders.firstOrNull { it.folderPath == path } }
+
+    val inGroupDetail = (activeTab == LibraryBrowserTab.ALBUMS && selectedAlbum != null) ||
+        (activeTab == LibraryBrowserTab.ARTISTS && selectedArtist != null) ||
+        (activeTab == LibraryBrowserTab.FOLDERS && selectedFolder != null)
+
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.TopCenter
     ) {
-        LazyColumn(
-            state = listState,
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .widthIn(max = 680.dp)
-                .fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .fillMaxSize()
         ) {
-            item {
-                PremiumScreenHeader(
-                    eyebrow = stringResource(R.string.your_collection),
-                    title = stringResource(R.string.library),
-                    subtitle = stringResource(R.string.library_screen_subtitle),
-                    trailingAction = onOpenSettings?.let { openSettings ->
-                        {
-                            IconButton(
-                                onClick = openSettings,
-                                modifier = Modifier.testTag("library_settings_button")
-                            ) {
-                                Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings))
-                            }
+            if (state.trackCount > 0 && !inGroupDetail) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        FilterPill(
+                            text = stringResource(R.string.all_songs_tab),
+                            selected = activeTab == LibraryBrowserTab.SONGS
+                        ) {
+                            activeTabName = LibraryBrowserTab.SONGS.name
                         }
                     }
-                )
-            }
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, SubtleBorder)
-                ) {
-                    Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(stringResource(R.string.indexed_tracks), style = MaterialTheme.typography.labelLarge, color = SecondaryText)
-                        Text(state.trackCount.toString(), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-                        if (state.isScanning) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                                Text(stringResource(R.string.indexing_in_background), color = SecondaryText)
-                            }
-                        } else {
-                            Button(onClick = onScanClick, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
-                                Text(stringResource(if (state.trackCount == 0) R.string.scan_music else R.string.update_library))
-                            }
-                            if (!hasAudioPermission) Text(stringResource(R.string.audio_permission_required), color = SecondaryText)
+                    item {
+                        FilterPill(
+                            text = stringResource(R.string.albums_tab),
+                            selected = activeTab == LibraryBrowserTab.ALBUMS
+                        ) {
+                            selectionMode = false
+                            selectedTrackKeys = emptySet()
+                            activeTabName = LibraryBrowserTab.ALBUMS.name
                         }
-                        if (state.scanFailed) Text(stringResource(R.string.indexing_failed), color = MaterialTheme.colorScheme.error)
+                    }
+                    item {
+                        FilterPill(
+                            text = stringResource(R.string.artists_tab),
+                            selected = activeTab == LibraryBrowserTab.ARTISTS
+                        ) {
+                            selectionMode = false
+                            selectedTrackKeys = emptySet()
+                            activeTabName = LibraryBrowserTab.ARTISTS.name
+                        }
+                    }
+                    item {
+                        FilterPill(
+                            text = stringResource(R.string.folders_tab),
+                            selected = activeTab == LibraryBrowserTab.FOLDERS
+                        ) {
+                            selectionMode = false
+                            selectedTrackKeys = emptySet()
+                            activeTabName = LibraryBrowserTab.FOLDERS.name
+                        }
                     }
                 }
             }
-            if (state.trackCount > 0) {
-                item {
-                    OutlinedTextField(
-                        value = state.searchQuery,
-                        onValueChange = onSearchChanged,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(searchFocusRequester)
-                            .testTag("library_search_input"),
-                        singleLine = true,
-                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                        trailingIcon = {
-                            if (state.searchQuery.isNotEmpty()) {
-                                IconButton(
-                                    onClick = { onSearchChanged("") },
-                                    modifier = Modifier.testTag("library_search_clear")
+
+            if (selectionMode && activeTab == LibraryBrowserTab.SONGS) {
+                Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
+                    MultiSelectActionBar(
+                        selectedCount = selectedTrackKeys.size,
+                        onSelectAll = {
+                            selectedTrackKeys = if (selectedTrackKeys.size == state.tracks.size) {
+                                emptySet()
+                            } else {
+                                state.tracks.map { it.trackKey }.toSet()
+                            }
+                        },
+                        onAddFavorites = {
+                            onBatchAddFavorites(selectedTrackKeys)
+                            Toast.makeText(context, context.getString(R.string.batch_added_favorites), Toast.LENGTH_SHORT).show()
+                            selectionMode = false
+                            selectedTrackKeys = emptySet()
+                        },
+                        onAddToPlaylist = {
+                            showBatchPlaylistDialog = true
+                        },
+                        onCancel = {
+                            selectionMode = false
+                            selectedTrackKeys = emptySet()
+                        }
+                    )
+                }
+            }
+
+            when {
+                activeTab == LibraryBrowserTab.ALBUMS && selectedAlbum != null -> {
+                    GroupTracksDetailView(
+                        title = selectedAlbum.name,
+                        subtitle = "${selectedAlbum.artist.ifBlank { stringResource(R.string.unknown_artist) }} • ${stringResource(R.string.playlist_track_count, selectedAlbum.tracks.size)}",
+                        tracks = selectedAlbum.tracks,
+                        activeTrackKey = activeTrackKey,
+                        repeatingTrackKey = repeatingTrackKey,
+                        favoriteKeys = state.favoriteKeys,
+                        onBack = { selectedAlbumName = null },
+                        onPlayTrack = onPlayGroupTracks,
+                        onPlayNext = onPlayNext,
+                        onToggleRepeatTrack = onToggleRepeatGroupTrack,
+                        onToggleFavorite = onToggleFavorite,
+                        onAddToPlaylist = onAddToPlaylistRequest,
+                        onChangeCover = onChangeCover,
+                        onResetCover = onResetCover
+                    )
+                }
+                activeTab == LibraryBrowserTab.ARTISTS && selectedArtist != null -> {
+                    GroupTracksDetailView(
+                        title = selectedArtist.name,
+                        subtitle = stringResource(R.string.playlist_track_count, selectedArtist.tracks.size),
+                        tracks = selectedArtist.tracks,
+                        activeTrackKey = activeTrackKey,
+                        repeatingTrackKey = repeatingTrackKey,
+                        favoriteKeys = state.favoriteKeys,
+                        onBack = { selectedArtistName = null },
+                        onPlayTrack = onPlayGroupTracks,
+                        onPlayNext = onPlayNext,
+                        onToggleRepeatTrack = onToggleRepeatGroupTrack,
+                        onToggleFavorite = onToggleFavorite,
+                        onAddToPlaylist = onAddToPlaylistRequest,
+                        onChangeCover = onChangeCover,
+                        onResetCover = onResetCover
+                    )
+                }
+                activeTab == LibraryBrowserTab.FOLDERS && selectedFolder != null -> {
+                    GroupTracksDetailView(
+                        title = selectedFolder.displayName.ifBlank { stringResource(R.string.folder_root) },
+                        subtitle = "${selectedFolder.folderPath} • ${stringResource(R.string.playlist_track_count, selectedFolder.tracks.size)}",
+                        tracks = selectedFolder.tracks,
+                        activeTrackKey = activeTrackKey,
+                        repeatingTrackKey = repeatingTrackKey,
+                        favoriteKeys = state.favoriteKeys,
+                        onBack = { selectedFolderPath = null },
+                        onPlayTrack = onPlayGroupTracks,
+                        onPlayNext = onPlayNext,
+                        onToggleRepeatTrack = onToggleRepeatGroupTrack,
+                        onToggleFavorite = onToggleFavorite,
+                        onAddToPlaylist = onAddToPlaylistRequest,
+                        onChangeCover = onChangeCover,
+                        onResetCover = onResetCover
+                    )
+                }
+                activeTab == LibraryBrowserTab.ALBUMS -> {
+                    AlbumsGridView(
+                        albums = state.albums,
+                        onAlbumClick = { selectedAlbumName = it.name }
+                    )
+                }
+                activeTab == LibraryBrowserTab.ARTISTS -> {
+                    ArtistsListView(
+                        artists = state.artists,
+                        onArtistClick = { selectedArtistName = it.name }
+                    )
+                }
+                activeTab == LibraryBrowserTab.FOLDERS -> {
+                    FoldersListView(
+                        folders = state.folders,
+                        onFolderClick = { selectedFolderPath = it.folderPath }
+                    )
+                }
+                else -> {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            item {
+                                PremiumScreenHeader(
+                                    eyebrow = stringResource(R.string.your_collection),
+                                    title = stringResource(R.string.library),
+                                    subtitle = stringResource(R.string.library_screen_subtitle),
+                                    trailingAction = onOpenSettings?.let { openSettings ->
+                                        {
+                                            IconButton(
+                                                onClick = openSettings,
+                                                modifier = Modifier.testTag("library_settings_button")
+                                            ) {
+                                                Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings))
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                            item {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(22.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    border = BorderStroke(1.dp, SubtleBorder)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Close,
-                                        contentDescription = stringResource(R.string.cancel)
+                                    Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Text(stringResource(R.string.indexed_tracks), style = MaterialTheme.typography.labelLarge, color = SecondaryText)
+                                        Text(state.trackCount.toString(), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                                        if (state.isScanning) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                                Text(stringResource(R.string.indexing_in_background), color = SecondaryText)
+                                            }
+                                        } else {
+                                            Button(onClick = onScanClick, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
+                                                Text(stringResource(if (state.trackCount == 0) R.string.scan_music else R.string.update_library))
+                                            }
+                                            if (!hasAudioPermission) Text(stringResource(R.string.audio_permission_required), color = SecondaryText)
+                                        }
+                                        if (state.scanFailed) Text(stringResource(R.string.indexing_failed), color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                            if (state.trackCount > 0) {
+                                item {
+                                    OutlinedTextField(
+                                        value = state.searchQuery,
+                                        onValueChange = onSearchChanged,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .focusRequester(searchFocusRequester)
+                                            .testTag("library_search_input"),
+                                        singleLine = true,
+                                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                                        trailingIcon = {
+                                            if (state.searchQuery.isNotEmpty()) {
+                                                IconButton(
+                                                    onClick = { onSearchChanged("") },
+                                                    modifier = Modifier.testTag("library_search_clear")
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Close,
+                                                        contentDescription = stringResource(R.string.cancel)
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        placeholder = { Text(stringResource(R.string.search_music)) },
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                        keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                }
+                                item {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        FilterPill(text = stringResource(R.string.all_songs), selected = !state.favoritesOnly) { onFavoritesOnlyChanged(false) }
+                                        FilterPill(text = stringResource(R.string.favorites), selected = state.favoritesOnly) { onFavoritesOnlyChanged(true) }
+                                        Box {
+                                            OutlinedButton(onClick = { sortMenuExpanded = true }) {
+                                                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null)
+                                                Text(stringResource(R.string.sort))
+                                            }
+                                            DropdownMenu(expanded = sortMenuExpanded, onDismissRequest = { sortMenuExpanded = false }) {
+                                                SortOption(R.string.sort_title, MusicLibraryViewModel.SORT_TITLE, state.sortMode, { onSortChanged(it); sortMenuExpanded = false })
+                                                SortOption(R.string.sort_artist, MusicLibraryViewModel.SORT_ARTIST, state.sortMode, { onSortChanged(it); sortMenuExpanded = false })
+                                                SortOption(R.string.sort_album, MusicLibraryViewModel.SORT_ALBUM, state.sortMode, { onSortChanged(it); sortMenuExpanded = false })
+                                                SortOption(R.string.sort_duration, MusicLibraryViewModel.SORT_DURATION, state.sortMode, { onSortChanged(it); sortMenuExpanded = false })
+                                                SortOption(R.string.sort_newest, MusicLibraryViewModel.SORT_NEWEST, state.sortMode, { onSortChanged(it); sortMenuExpanded = false })
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (state.tracks.isEmpty()) {
+                                item {
+                                    FeatureEmptyState(
+                                        icon = if (state.favoritesOnly) Icons.Filled.FavoriteBorder else Icons.Filled.LibraryMusic,
+                                        title = stringResource(
+                                            when {
+                                                state.trackCount == 0 -> R.string.library_empty_title
+                                                state.searchQuery.isNotBlank() -> R.string.no_search_results
+                                                state.favoritesOnly -> R.string.no_favorite_results
+                                                else -> R.string.no_search_results
+                                            }
+                                        ),
+                                        description = stringResource(
+                                            when {
+                                                state.trackCount == 0 -> R.string.library_empty_body
+                                                state.searchQuery.isNotBlank() -> R.string.no_search_results_body
+                                                state.favoritesOnly -> R.string.no_favorite_results_body
+                                                else -> R.string.no_search_results_body
+                                            }
+                                        )
+                                    )
+                                }
+                            } else {
+                                item {
+                                    Text(
+                                        text = stringResource(if (state.favoritesOnly) R.string.favorites else R.string.songs),
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                items(state.tracks, key = { it.trackKey }) { track ->
+                                    val isTrackSelected = track.trackKey in selectedTrackKeys
+                                    EditorialTrackRow(
+                                        track = track,
+                                        isCurrentTrack = track.trackKey == activeTrackKey,
+                                        isRepeatingTrack = track.trackKey == repeatingTrackKey,
+                                        isHighlighted = track.trackKey == highlightedTrackKey,
+                                        isFavorite = track.trackKey in state.favoriteKeys,
+                                        selectionMode = selectionMode,
+                                        isSelected = isTrackSelected,
+                                        onClick = {
+                                            if (selectionMode) {
+                                                selectedTrackKeys = if (isTrackSelected) {
+                                                    selectedTrackKeys - track.trackKey
+                                                } else {
+                                                    selectedTrackKeys + track.trackKey
+                                                }
+                                            } else {
+                                                onTrackClick(track)
+                                            }
+                                        },
+                                        onLongClick = {
+                                            if (!selectionMode) {
+                                                selectionMode = true
+                                                selectedTrackKeys = setOf(track.trackKey)
+                                            }
+                                        },
+                                        onPlayNext = { onPlayNext(track) },
+                                        onGoToArtist = {
+                                            val artistTarget = track.displayArtist.trim()
+                                            if (artistTarget.isNotEmpty()) {
+                                                activeTabName = LibraryBrowserTab.ARTISTS.name
+                                                selectedArtistName = artistTarget
+                                            }
+                                        },
+                                        onGoToAlbum = {
+                                            val albumTarget = track.displayAlbum.trim()
+                                            if (albumTarget.isNotEmpty()) {
+                                                activeTabName = LibraryBrowserTab.ALBUMS.name
+                                                selectedAlbumName = albumTarget
+                                            }
+                                        },
+                                        onToggleRepeatTrack = { onToggleRepeatTrack(track) },
+                                        onToggleFavorite = { onToggleFavorite(track.trackKey) },
+                                        onAddToPlaylist = { onAddToPlaylistRequest(track) },
+                                        onEditMetadata = { trackForEditKey = track.trackKey },
+                                        onChangeCover = { onChangeCover(track) },
+                                        onResetCover = { onResetCover(track) }
                                     )
                                 }
                             }
-                        },
-                        placeholder = { Text(stringResource(R.string.search_music)) },
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                        shape = RoundedCornerShape(16.dp)
-                    )
-                }
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterPill(text = stringResource(R.string.all_songs), selected = !state.favoritesOnly) { onFavoritesOnlyChanged(false) }
-                        FilterPill(text = stringResource(R.string.favorites), selected = state.favoritesOnly) { onFavoritesOnlyChanged(true) }
-                        Box {
-                            OutlinedButton(onClick = { sortMenuExpanded = true }) {
-                                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null)
-                                Text(stringResource(R.string.sort))
-                            }
-                            DropdownMenu(expanded = sortMenuExpanded, onDismissRequest = { sortMenuExpanded = false }) {
-                                SortOption(R.string.sort_title, MusicLibraryViewModel.SORT_TITLE, state.sortMode, { onSortChanged(it); sortMenuExpanded = false })
-                                SortOption(R.string.sort_artist, MusicLibraryViewModel.SORT_ARTIST, state.sortMode, { onSortChanged(it); sortMenuExpanded = false })
-                                SortOption(R.string.sort_album, MusicLibraryViewModel.SORT_ALBUM, state.sortMode, { onSortChanged(it); sortMenuExpanded = false })
-                                SortOption(R.string.sort_duration, MusicLibraryViewModel.SORT_DURATION, state.sortMode, { onSortChanged(it); sortMenuExpanded = false })
-                                SortOption(R.string.sort_newest, MusicLibraryViewModel.SORT_NEWEST, state.sortMode, { onSortChanged(it); sortMenuExpanded = false })
-                            }
                         }
+                        LibraryFastScroller(
+                            tracks = state.tracks,
+                            listState = listState,
+                            headerOffset = LIBRARY_TRACK_LIST_HEADER_COUNT,
+                            modifier = Modifier.align(Alignment.CenterEnd)
+                        )
                     }
                 }
             }
-            if (state.tracks.isEmpty()) {
-                item {
-                    FeatureEmptyState(
-                        icon = if (state.favoritesOnly) Icons.Filled.FavoriteBorder else Icons.Filled.LibraryMusic,
-                        title = stringResource(
-                            when {
-                                state.trackCount == 0 -> R.string.library_empty_title
-                                state.searchQuery.isNotBlank() -> R.string.no_search_results
-                                state.favoritesOnly -> R.string.no_favorite_results
-                                else -> R.string.no_search_results
-                            }
-                        ),
-                        description = stringResource(
-                            when {
-                                state.trackCount == 0 -> R.string.library_empty_body
-                                state.searchQuery.isNotBlank() -> R.string.no_search_results_body
-                                state.favoritesOnly -> R.string.no_favorite_results_body
-                                else -> R.string.no_search_results_body
-                            }
-                        )
-                    )
-                }
-            } else {
-                item {
-                    Text(
-                        text = stringResource(if (state.favoritesOnly) R.string.favorites else R.string.songs),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                items(state.tracks, key = { it.trackKey }) { track ->
-                    EditorialTrackRow(
-                        track = track,
-                        isCurrentTrack = track.trackKey == activeTrackKey,
-                        isRepeatingTrack = track.trackKey == repeatingTrackKey,
-                        isHighlighted = track.trackKey == highlightedTrackKey,
-                        isFavorite = track.trackKey in state.favoriteKeys,
-                        onClick = { onTrackClick(track) },
-                        onToggleRepeatTrack = { onToggleRepeatTrack(track) },
-                        onToggleFavorite = { onToggleFavorite(track.trackKey) },
-                        onAddToPlaylist = { onAddToPlaylistRequest(track) },
-                        onEditMetadata = { trackForEditKey = track.trackKey },
-                        onChangeCover = { onChangeCover(track) },
-                        onResetCover = { onResetCover(track) }
-                    )
-                }
-            }
         }
+    }
+
+    if (showBatchPlaylistDialog) {
+        BatchPlaylistSelectDialog(
+            selectedCount = selectedTrackKeys.size,
+            playlists = state.playlists,
+            onSelectPlaylist = { playlistId ->
+                onBatchAddToPlaylist(playlistId, selectedTrackKeys)
+                selectionMode = false
+                selectedTrackKeys = emptySet()
+            },
+            onCreatePlaylist = onCreatePlaylist,
+            onDismiss = { showBatchPlaylistDialog = false }
+        )
     }
 
     trackForEdit?.let { track ->

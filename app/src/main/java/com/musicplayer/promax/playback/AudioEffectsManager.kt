@@ -92,12 +92,30 @@ class AudioEffectsManager(audioSessionId: Int) {
                 Preset.ROCK -> listOf(450, 200, -100, 300, 550)
                 Preset.JAZZ -> listOf(350, 150, -150, 250, 400)
                 Preset.DANCE -> listOf(550, 350, 0, 300, 450)
+                Preset.CLASSICAL -> listOf(350, 200, -100, 250, 400)
+                Preset.ACOUSTIC -> listOf(250, 150, 200, 350, 200)
             }
             val range = eq.bandLevelRange
             for (i in 0 until count) {
                 val normalized = if (count == 1) 2 else (i * 4f / (count - 1)).toInt().coerceIn(0, 4)
                 val value = values[normalized].coerceIn(range[0].toInt(), range[1].toInt())
                 eq.setBandLevel(i.toShort(), value.toShort())
+            }
+        }
+    }
+
+    fun applyBandLevels(levelsMb: List<Int>) {
+        if (levelsMb.isEmpty()) return
+        runCatching {
+            val eq = equalizer ?: return
+            val count = eq.numberOfBands.toInt()
+            if (count <= 0) return
+            val range = eq.bandLevelRange
+            val minMb = range[0].toInt()
+            val maxMb = range[1].toInt()
+            for (i in 0 until count) {
+                val target = levelsMb.getOrNull(i) ?: continue
+                eq.setBandLevel(i.toShort(), target.coerceIn(minMb, maxMb).toShort())
             }
         }
     }
@@ -114,7 +132,7 @@ class AudioEffectsManager(audioSessionId: Int) {
         loudnessEnhancer = null
     }
 
-    enum class Preset { FLAT, BASS, VOCAL, TREBLE, POP, ROCK, JAZZ, DANCE }
+    enum class Preset { FLAT, BASS, VOCAL, TREBLE, POP, ROCK, JAZZ, DANCE, CLASSICAL, ACOUSTIC }
 }
 
 /** Same-process bridge: the playback service owns the effects and the UI only controls them. */

@@ -4,6 +4,10 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.ContentObserver
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -16,14 +20,18 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.session.MediaController
-import com.musicplayer.promax.playback.PlaybackController
 import com.google.common.util.concurrent.ListenableFuture
 import com.musicplayer.promax.data.preferences.DataStoreUserPreferencesRepository
 import com.musicplayer.promax.data.work.MusicIndexScheduler
+import com.musicplayer.promax.playback.PlaybackController
 import com.musicplayer.promax.presentation.library.MusicLibraryViewModel
 import com.musicplayer.promax.presentation.settings.SettingsViewModel
 import com.musicplayer.promax.presentation.statistics.StatisticsViewModel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -31,8 +39,33 @@ class MainActivity : AppCompatActivity() {
     private var pendingIndexRunnable: Runnable? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     @Volatile private var activityDestroyed = false
+    @Volatile private var shakeToSkipEnabled = false
+    @Volatile private var isResumedState = false
     private val playbackController = mutableStateOf<MediaController?>(null)
     private val openNowPlayingSignal = mutableIntStateOf(0)
+
+    private var sensorManager: SensorManager? = null
+    private var accelerometer: Sensor? = null
+    private var lastShakeTriggerMs: Long = 0L
+
+    private val shakeListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (!shakeToSkipEnabled) return
+            val controller = playbackController.value ?: return
+            if (!controller.isPlaying) return
+            val x = event.values.getOrElse(0) { 0f }
+            val y = event.values.getOrElse(1) { 0f }
+            val z = event.values.getOrElse(2) { 0f }
+            val netAcceleration = sqrt(x * x + y * y + z * z) - SensorManager.GRAVITY_EARTH
+            val now = System.currentTimeMillis()
+            if (netAcceleration > 14.5f && now - lastShakeTriggerMs > 1_200L) {
+                lastShakeTriggerMs = now
+                controller.seekToNextMediaItem()
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -45,7 +78,17 @@ class MainActivity : AppCompatActivity() {
             MusicIndexScheduler.ensurePeriodicUpdates(applicationContext)
         }
 
+        sensorManager = getSystemService(SENSOR_SERVICE) as? SensorManager
+        accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
         val preferences = DataStoreUserPreferencesRepository(applicationContext)
+        lifecycleScope.launch {
+            preferences.shakeToSkipEnabled.collectLatest { enabled ->
+                shakeToSkipEnabled = enabled
+                updateShakeSensorRegistration()
+            }
+        }
+
         val settingsViewModel = ViewModelProvider(
             this,
             SettingsViewModel.Factory(preferences)
@@ -95,22 +138,36 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        isResumedState = true
+        updateShakeSensorRegistration()
         if (ContextCompat.checkSelfPermission(this, audioPermissionName()) == PackageManager.PERMISSION_GRANTED) {
             registerMusicObserver()
         }
     }
 
     override fun onPause() {
+        isResumedState = false
+        updateShakeSensorRegistration()
         unregisterMusicObserver()
         super.onPause()
     }
 
     override fun onDestroy() {
         activityDestroyed = true
+        sensorManager?.unregisterListener(shakeListener)
         playbackController.value = null
         controllerFuture?.let(MediaController::releaseFuture)
         controllerFuture = null
         super.onDestroy()
+    }
+
+    private fun updateShakeSensorRegistration() {
+        val mgr = sensorManager ?: return
+        val sensor = accelerometer ?: return
+        mgr.unregisterListener(shakeListener)
+        if (isResumedState && shakeToSkipEnabled && !activityDestroyed) {
+            mgr.registerListener(shakeListener, sensor, SensorManager.SENSOR_DELAY_UI)
+        }
     }
 
     private fun audioPermissionName(): String = if (Build.VERSION.SDK_INT >= 33) {

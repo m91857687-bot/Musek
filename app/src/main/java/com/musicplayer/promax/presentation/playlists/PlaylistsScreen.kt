@@ -26,10 +26,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.PlayArrow
@@ -39,6 +43,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -101,6 +106,8 @@ fun PlaylistsScreen(
     onToggleFavorite: (String) -> Unit = {},
     onChangeCover: (MusicTrackEntity) -> Unit = {},
     onResetCover: (MusicTrackEntity) -> Unit = {},
+    onImportM3uClick: () -> Unit = {},
+    onExportM3uClick: (String, List<MusicTrackEntity>) -> Unit = { _, _ -> },
     onOpenSettings: (() -> Unit)? = null
 ) {
     var selectedPlaylistId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -287,6 +294,18 @@ fun PlaylistsScreen(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
+                        if (playlistTracks.isNotEmpty()) {
+                            IconButton(
+                                onClick = { onExportM3uClick(selectedPlaylist.playlist.name, playlistTracks) },
+                                modifier = Modifier.testTag("playlist_export_m3u_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.FileUpload,
+                                    contentDescription = stringResource(R.string.export_m3u),
+                                    tint = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
                         IconButton(onClick = { showRenameDialog = true }) {
                             Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.rename))
                         }
@@ -316,11 +335,29 @@ fun PlaylistsScreen(
                             state = detailListState,
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            items(playlistTracks, key = { it.trackKey }) { track ->
+                            itemsIndexed(playlistTracks, key = { _, it -> it.trackKey }) { index, track ->
                                 PlaylistTrackRow(
                                     track = track,
                                     isCurrentTrack = track.trackKey == activeTrackKey,
                                     isRepeatingTrack = track.trackKey == repeatingTrackKey,
+                                    canMoveUp = index > 0,
+                                    canMoveDown = index < playlistTracks.lastIndex,
+                                    onMoveUp = {
+                                        viewModel.movePlaylistTrack(
+                                            selectedPlaylist.playlist.playlistId,
+                                            playlistTracks,
+                                            index,
+                                            index - 1
+                                        )
+                                    },
+                                    onMoveDown = {
+                                        viewModel.movePlaylistTrack(
+                                            selectedPlaylist.playlist.playlistId,
+                                            playlistTracks,
+                                            index,
+                                            index + 1
+                                        )
+                                    },
                                     onPlay = { onPlayTrack(playlistTracks, track) },
                                     onToggleRepeat = { onToggleRepeatTrack(playlistTracks, track) },
                                     onRemove = { viewModel.removeTrackFromPlaylist(selectedPlaylist.playlist.playlistId, track.trackKey) }
@@ -413,12 +450,28 @@ fun PlaylistsScreen(
                     }
 
                     item {
-                        Button(
-                            onClick = { showCreateDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            modifier = Modifier.fillMaxWidth()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text(stringResource(R.string.create_playlist))
+                            Button(
+                                onClick = { showCreateDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(R.string.create_playlist), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            OutlinedButton(
+                                onClick = onImportM3uClick,
+                                border = BorderStroke(1.dp, SubtleBorder),
+                                modifier = Modifier.testTag("playlists_import_m3u_button")
+                            ) {
+                                Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(R.string.import_m3u), maxLines = 1)
+                            }
                         }
                     }
 
@@ -718,6 +771,10 @@ private fun PlaylistTrackRow(
     track: MusicTrackEntity,
     isCurrentTrack: Boolean,
     isRepeatingTrack: Boolean,
+    canMoveUp: Boolean = false,
+    canMoveDown: Boolean = false,
+    onMoveUp: () -> Unit = {},
+    onMoveDown: () -> Unit = {},
     onPlay: () -> Unit,
     onToggleRepeat: () -> Unit,
     onRemove: () -> Unit
@@ -766,6 +823,20 @@ private fun PlaylistTrackRow(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(onClick = onMoveUp, enabled = canMoveUp) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowUpward,
+                        contentDescription = stringResource(R.string.move_up),
+                        tint = if (canMoveUp) SecondaryText else SubtleBorder
+                    )
+                }
+                IconButton(onClick = onMoveDown, enabled = canMoveDown) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowDownward,
+                        contentDescription = stringResource(R.string.move_down),
+                        tint = if (canMoveDown) SecondaryText else SubtleBorder
+                    )
+                }
                 IconButton(onClick = onToggleRepeat) {
                     Icon(
                         imageVector = if (isRepeatingTrack) Icons.Filled.RepeatOne else Icons.Filled.Repeat,

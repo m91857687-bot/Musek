@@ -1,17 +1,24 @@
 package com.musicplayer.promax.playback
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.musicplayer.promax.MainActivity
 import com.musicplayer.promax.data.local.MusicLibraryDatabase
 import com.musicplayer.promax.data.preferences.DataStoreUserPreferencesRepository
+import com.musicplayer.promax.domain.model.CustomEqProfileCodec
 import com.musicplayer.promax.widget.MusicPlayerWidgetProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,11 +31,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Owns the player independently of the Activity so audio can continue in the background. */
+@OptIn(UnstableApi::class)
 class MusicPlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private var audioEffectsManager: AudioEffectsManager? = null
     private var player: ExoPlayer? = null
     private var historyRecorder: PlaybackHistoryRecorder? = null
+    private val stereoBalanceProcessor = StereoBalanceAudioProcessor()
     private var currentAudioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
     private var crossfadeJob: Job? = null
     @Volatile private var configuredCrossfadeMs: Long = 2_000L
@@ -71,7 +80,20 @@ class MusicPlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         preferences = DataStoreUserPreferencesRepository(applicationContext)
-        val activePlayer = ExoPlayer.Builder(this).build().apply {
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean
+            ): AudioSink {
+                return DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .setAudioProcessors(arrayOf(stereoBalanceProcessor))
+                    .build()
+            }
+        }
+        val activePlayer = ExoPlayer.Builder(this, renderersFactory).build().apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -87,6 +109,16 @@ class MusicPlaybackService : MediaSessionService() {
         serviceScope.launch {
             preferences.playbackSpeed.collectLatest { speed ->
                 activePlayer.setPlaybackSpeed(speed)
+            }
+        }
+        serviceScope.launch {
+            preferences.skipSilenceEnabled.collectLatest { skipSilence ->
+                activePlayer.skipSilenceEnabled = skipSilence
+            }
+        }
+        serviceScope.launch {
+            preferences.stereoBalance.collectLatest { balance ->
+                stereoBalanceProcessor.setBalance(balance)
             }
         }
         serviceScope.launch {
@@ -107,8 +139,17 @@ class MusicPlaybackService : MediaSessionService() {
                         if (waitMillis <= 0L) break
                         delay(waitMillis)
                     }
-                    if (player?.isPlaying == true) {
-                        player?.pause()
+                    val active = player
+                    if (active?.isPlaying == true) {
+                        // Gentle fade-out before pausing on Sleep Timer completion
+                        val steps = 12
+                        for (step in steps downTo 1) {
+                            if (player?.isPlaying != true) break
+                            active.volume = (step.toFloat() / steps.toFloat()).coerceIn(0.05f, 1.0f)
+                            delay(140L)
+                        }
+                        active.pause()
+                        active.volume = 1.0f
                     }
                     preferences.setSleepTimerEndMillis(null)
                 }
@@ -199,11 +240,14 @@ class MusicPlaybackService : MediaSessionService() {
             serviceScope.launch {
                 val enabled = preferences.audioEffectsEnabled.first()
                 val presetName = preferences.eqPresetName.first()
+                val savedBandLevels = CustomEqProfileCodec.decodeBandLevels(preferences.eqBandLevelsMb.first())
                 val bass = preferences.bassBoostStrength.first()
                 val virtualizer = preferences.virtualizerStrength.first()
                 val loudness = preferences.loudnessGainMb.first()
-                presetName?.let { name ->
-                    runCatching { AudioEffectsManager.Preset.valueOf(name) }.getOrNull()?.let(created::applyPreset)
+                if (presetName != null) {
+                    runCatching { AudioEffectsManager.Preset.valueOf(presetName) }.getOrNull()?.let(created::applyPreset)
+                } else if (savedBandLevels.isNotEmpty()) {
+                    created.applyBandLevels(savedBandLevels)
                 }
                 created.setBassStrength(bass)
                 created.setVirtualizerStrength(virtualizer)

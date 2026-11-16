@@ -2,9 +2,11 @@ package com.musicplayer.promax.presentation.components
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,14 +23,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.RestartAlt
@@ -230,6 +236,7 @@ fun TrackArtworkBox(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun EditorialTrackRow(
     track: MusicTrackEntity,
@@ -237,7 +244,13 @@ fun EditorialTrackRow(
     isRepeatingTrack: Boolean = false,
     isHighlighted: Boolean = false,
     isFavorite: Boolean? = null,
+    selectionMode: Boolean = false,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    onPlayNext: (() -> Unit)? = null,
+    onGoToArtist: (() -> Unit)? = null,
+    onGoToAlbum: (() -> Unit)? = null,
     onToggleRepeatTrack: (() -> Unit)? = null,
     onToggleFavorite: (() -> Unit)? = null,
     onAddToPlaylist: (() -> Unit)? = null,
@@ -247,21 +260,33 @@ fun EditorialTrackRow(
     showDivider: Boolean = true
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val hasMenu = onEditMetadata != null || onChangeCover != null || (onResetCover != null && !track.artworkFilePath.isNullOrEmpty())
-    val hasQuickActions = onToggleRepeatTrack != null || onAddToPlaylist != null || (onToggleFavorite != null && isFavorite != null)
+    val hasMenu = onPlayNext != null || onGoToArtist != null || onGoToAlbum != null ||
+        onEditMetadata != null || onChangeCover != null ||
+        (onResetCover != null && !track.artworkFilePath.isNullOrEmpty())
+    val hasQuickActions = !selectionMode && (onToggleRepeatTrack != null || onAddToPlaylist != null || (onToggleFavorite != null && isFavorite != null))
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        color = if (isHighlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
-        border = if (isHighlighted) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)) else null
+        color = when {
+            isSelected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+            isHighlighted -> MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+            else -> Color.Transparent
+        },
+        border = when {
+            isSelected || isHighlighted -> BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+            else -> null
+        }
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onClick)
-                    .padding(horizontal = if (isHighlighted) 8.dp else 0.dp, vertical = 10.dp),
+                    .combinedClickable(
+                        onClick = onClick,
+                        onLongClick = onLongClick
+                    )
+                    .padding(horizontal = if (isHighlighted || isSelected) 8.dp else 0.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Row(
@@ -269,6 +294,12 @@ fun EditorialTrackRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (selectionMode) {
+                        Checkbox(
+                            checked = isSelected,
+                            onCheckedChange = { onClick() }
+                        )
+                    }
                     TrackArtworkBox(
                         artworkPath = track.artworkFilePath,
                         size = 54.dp,
@@ -300,7 +331,7 @@ fun EditorialTrackRow(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    if (hasMenu) {
+                    if (!selectionMode && hasMenu) {
                         Box {
                             IconButton(
                                 onClick = { menuExpanded = true },
@@ -316,6 +347,36 @@ fun EditorialTrackRow(
                                 expanded = menuExpanded,
                                 onDismissRequest = { menuExpanded = false }
                             ) {
+                                if (onPlayNext != null) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.play_next)) },
+                                        leadingIcon = { Icon(Icons.Filled.PlaylistPlay, contentDescription = null) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onPlayNext()
+                                        }
+                                    )
+                                }
+                                if (onGoToArtist != null && track.displayArtist.isNotBlank()) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.go_to_artist)) },
+                                        leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onGoToArtist()
+                                        }
+                                    )
+                                }
+                                if (onGoToAlbum != null && track.displayAlbum.isNotBlank()) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.go_to_album)) },
+                                        leadingIcon = { Icon(Icons.Filled.Album, contentDescription = null) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onGoToAlbum()
+                                        }
+                                    )
+                                }
                                 if (onEditMetadata != null) {
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.edit_track_metadata)) },
@@ -403,6 +464,120 @@ fun EditorialTrackRow(
             }
         }
     }
+}
+
+@Composable
+fun BatchPlaylistSelectDialog(
+    selectedCount: Int,
+    playlists: List<PlaylistWithCount>,
+    onSelectPlaylist: (Long) -> Unit,
+    onCreatePlaylist: (String, (Boolean) -> Unit) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var showCreate by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+    var duplicateError by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.add_to_playlist)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.multi_select_count, selectedCount),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+                if (playlists.isNotEmpty()) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 260.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(playlists, key = { it.playlist.playlistId }) { item ->
+                            Surface(
+                                onClick = {
+                                    onSelectPlaylist(item.playlist.playlistId)
+                                    onDismiss()
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.QueueMusic,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = item.playlist.name,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = item.trackCount.toString(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = SecondaryText
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else if (!showCreate) {
+                    Text(stringResource(R.string.create_playlist_first), color = SecondaryText)
+                }
+                if (showCreate) {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = {
+                            newName = it.take(50)
+                            duplicateError = false
+                        },
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.playlist_name)) },
+                        isError = duplicateError,
+                        supportingText = if (duplicateError) ({ Text(stringResource(R.string.playlist_name_duplicate)) }) else null,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    TextButton(
+                        onClick = {
+                            val clean = newName.trim()
+                            if (clean.isNotEmpty()) {
+                                onCreatePlaylist(clean) { created ->
+                                    if (created) {
+                                        newName = ""
+                                        showCreate = false
+                                    } else {
+                                        duplicateError = true
+                                    }
+                                }
+                            }
+                        },
+                        enabled = newName.isNotBlank()
+                    ) {
+                        Text(stringResource(R.string.create))
+                    }
+                } else {
+                    TextButton(onClick = { showCreate = true }) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text(stringResource(R.string.create_playlist))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        }
+    )
 }
 
 @Composable

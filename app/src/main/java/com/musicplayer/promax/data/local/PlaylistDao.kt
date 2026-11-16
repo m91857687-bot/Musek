@@ -35,6 +35,12 @@ interface PlaylistDao {
     }
 
     @Transaction
+    suspend fun createPlaylistReturningIdIfAvailable(playlist: PlaylistEntity): Long? {
+        if (playlist.name.isBlank() || playlistNameExists(playlist.name)) return null
+        return insertPlaylist(playlist)
+    }
+
+    @Transaction
     suspend fun renamePlaylistIfNameAvailable(playlistId: Long, name: String, updatedAt: Long): Boolean {
         if (name.isBlank() || playlistNameExistsExcept(name, playlistId)) return false
         return renamePlaylist(playlistId, name, updatedAt) > 0
@@ -56,6 +62,17 @@ interface PlaylistDao {
     suspend fun addTrack(playlistId: Long, trackKey: String, now: Long) {
         val inserted = insertPlaylistTrack(PlaylistTrackEntity(playlistId, trackKey, nextPosition(playlistId), now))
         if (inserted != -1L) touchPlaylist(playlistId, now)
+    }
+
+    @Query("UPDATE playlist_tracks SET position = :position WHERE playlistId = :playlistId AND trackKey = :trackKey")
+    suspend fun updateTrackPosition(playlistId: Long, trackKey: String, position: Int)
+
+    @Transaction
+    suspend fun reorderPlaylistTracks(playlistId: Long, orderedTrackKeys: List<String>, now: Long) {
+        orderedTrackKeys.forEachIndexed { index, trackKey ->
+            updateTrackPosition(playlistId, trackKey, index)
+        }
+        touchPlaylist(playlistId, now)
     }
 
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackKey = :trackKey")
